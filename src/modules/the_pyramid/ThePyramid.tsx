@@ -1,4 +1,4 @@
-import { Button, CircularProgress, Stack, TextField, Typography } from "@mui/material";
+import { Button, CircularProgress, Paper, Stack, TextField, Typography } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import Tree from "react-d3-tree";
 import { CustomNodeElementProps, RawNodeDatum } from "react-d3-tree/lib/types/common";
@@ -96,6 +96,7 @@ const ThePyramid = () => {
     const [currentCycle, setCurrentCycle] = useState<number>(1);
     const [orgChart, setOrgChart] = useState<Pyramid>();
     const [numOfParticipants, setNumOfParticipants] = useState<number>(200);
+    const [percentDistributions, setPercentDistributions] = useState<number>(20);
 
     const { seconds, minutes, hours, days, isRunning, start, pause, resume, restart } = useTimer({
         expiryTimestamp: new Date(),
@@ -140,7 +141,7 @@ const ThePyramid = () => {
     }
 
     function addIncomeToMoney(node: TreeNode | Pyramid) {
-        const percentReduction = (100 - PERCENT_TO_OWNER) / 100;
+        const percentReduction = (100 - percentDistributions) / 100;
         node.attributes.money += Number(Number(node.attributes.income * percentReduction).toFixed(2)).valueOf();
         node.attributes.income = 0;
     }
@@ -173,7 +174,7 @@ const ThePyramid = () => {
             clonedPyramid.children = children;
         }
 
-        const percentReduction = PERCENT_TO_OWNER / 100;
+        const percentReduction = percentDistributions / 100;
         const income = CYCLE_INCOME + childrensIncome * percentReduction;
         clonedPyramid.attributes.income += Number(numeral(income).format("0.00"));
         addIncomeToMoneyToChild(children, LEFT);
@@ -288,7 +289,7 @@ const ThePyramid = () => {
         setCurrentCycle(1);
         const numOfPeople = numOfParticipants;
         const initialOrg: Pyramid = {
-            name: "First Org",
+            name: "CEO",
             attributes: {
                 income: 0,
                 money: CYCLE_INCOME,
@@ -337,7 +338,7 @@ const ThePyramid = () => {
                 <text font-family="Arial, Helvetica, sans-serif" fill="black" strokeWidth="1" x="10" y="-15">
                     {props.nodeDatum.name}
                 </text>
-                
+
                 <Rect width={125} height={60} tl={7} tr={7} bl={7} br={7} color="white" x={-50} y={25} />
                 <text font-family="Arial, Helvetica, sans-serif" fill="black" x={-45} dy="45" strokeWidth="1">
                     ${Number(props.nodeDatum.attributes?.money).toFixed(2)}
@@ -351,10 +352,12 @@ const ThePyramid = () => {
     }, []);
 
     return (
-        <>
-            <Stack>
-                <Typography variant="h6">Next Cycle {currentCycle + 1}</Typography>
-                <Progress duration={INTERVAL_TIME} timeLeft={seconds} text="test" />
+        <Stack spacing={3}>
+            <Stack display="flex" alignItems="center" spacing={3}>
+                <Paper elevation={5} style={{ padding: "15px", minWidth: "250px", marginTop: "10px" }}>
+                    <Typography variant="h6">Next Cycle {currentCycle + 1}</Typography>
+                    <Progress duration={INTERVAL_TIME} timeLeft={seconds} text="test" />
+                </Paper>
             </Stack>
             <div id="treeWrapper" style={{ width: "100%", height: "60vh" }}>
                 {orgChart && orgChart?.children?.length > 0 ? (
@@ -368,19 +371,36 @@ const ThePyramid = () => {
                     <CircularProgress />
                 )}
             </div>
-            <Stack display="flex" alignItems="center">
-                <Stack direction="row">
-                    {isRunning ? <Button onClick={pause}>Pause</Button> : <Button onClick={resume}>Resume</Button>}
-                    <Button onClick={timerExpired}>Trigger Cycle</Button>
-                    <Button onClick={buildPyramid}>Rebuild Pyramid</Button>
-                </Stack>
-                <TextField
-                    onChange={(event: any) => setNumOfParticipants(Number(event.target.value))}
-                    type="number"
-                    value={numOfParticipants}
-                />
+            <Stack display="flex" alignItems="center" spacing={3}>
+                <Paper elevation={5} style={{ padding: "15px" }}>
+                    <Stack display="flex" alignItems="center" spacing={3}>
+                        <Stack direction="row">
+                            {isRunning ? (
+                                <Button onClick={pause}>Pause</Button>
+                            ) : (
+                                <Button onClick={resume}>Resume</Button>
+                            )}
+                            <Button onClick={timerExpired}>Trigger Cycle</Button>
+                            <Button onClick={buildPyramid}>Rebuild Pyramid</Button>
+                        </Stack>
+                        <Stack direction="row" spacing={3}>
+                            <TextField
+                                label="Participants"
+                                onChange={(event: any) => setNumOfParticipants(Number(event.target.value))}
+                                type="number"
+                                value={numOfParticipants}
+                            />
+                            <TextField
+                                label="% Distributions"
+                                onChange={(event: any) => setPercentDistributions(Number(event.target.value))}
+                                type="number"
+                                value={percentDistributions}
+                            />
+                        </Stack>
+                    </Stack>
+                </Paper>
             </Stack>
-        </>
+        </Stack>
     );
 };
 
