@@ -1,4 +1,4 @@
-import { Button, CircularProgress, Stack, TextField } from "@mui/material";
+import { Button, CircularProgress, Stack, TextField, Typography } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import Tree from "react-d3-tree";
 import { RawNodeDatum } from "react-d3-tree/lib/types/common";
@@ -79,6 +79,7 @@ const PERCENT_TO_OWNER = 20;
 // };
 
 const ThePyramid = () => {
+    const [currentCycle, setCurrentCycle] = useState<number>(1);
     const [orgChart, setOrgChart] = useState<Pyramid>();
     const [numOfParticipants, setNumOfParticipants] = useState<number>(200);
 
@@ -109,6 +110,7 @@ const ThePyramid = () => {
     function timerExpired() {
         const newPyramid = setIncome(orgChart as Pyramid);
         setOrgChart(newPyramid);
+        setCurrentCycle(currentCycle + 1)
         setTimeout(() => {
             restartInterval();
         }, CYCLE_INCOME);
@@ -282,6 +284,7 @@ const ThePyramid = () => {
     }
 
     function buildPyramid() {
+        setCurrentCycle(1)
         const numOfPeople = numOfParticipants;
         const initialOrg: Pyramid = {
             name: "First Org",
@@ -307,7 +310,10 @@ const ThePyramid = () => {
 
     return (
         <>
-            <Progress duration={INTERVAL_TIME} timeLeft={seconds} text="test" />
+            <Stack>
+                <Typography variant = "h6">Next Cycle {currentCycle + 1}</Typography>
+                <Progress duration={INTERVAL_TIME} timeLeft={seconds} text="test" />
+            </Stack>
             <div id="treeWrapper" style={{ width: "100%", height: "60vh" }}>
                 {orgChart && orgChart?.children?.length > 0 ? (
                     <Tree data={orgChart as Pyramid} orientation="vertical" />
