@@ -359,7 +359,7 @@ const ThePyramid = () => {
                     <Progress duration={INTERVAL_TIME} timeLeft={seconds} text="test" />
                 </Paper>
             </Stack>
-            <div id="treeWrapper" style={{ width: "100%", height: "60vh" }}>
+            <Paper elevation={3} id="treeWrapper" style={{ width: "100%", height: "60vh", marginLeft: '7px', marginRight: '10px' }}>
                 {orgChart && orgChart?.children?.length > 0 ? (
                     <Tree
                         renderCustomNodeElement={renderCustomNode}
@@ -370,7 +370,7 @@ const ThePyramid = () => {
                 ) : (
                     <CircularProgress />
                 )}
-            </div>
+            </Paper>
             <Stack display="flex" alignItems="center" spacing={3}>
                 <Paper elevation={5} style={{ padding: "15px" }}>
                     <Stack display="flex" alignItems="center" spacing={3}>
