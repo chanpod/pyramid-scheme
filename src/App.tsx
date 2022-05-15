@@ -19,10 +19,12 @@ import "@fontsource/roboto/700.css";
 import AppContainer from "./modules/AppContainer.layout";
 
 function App() {
+    console.debug("App loaded");
+    console.debug(process.env.PUBLIC_URL);
     return (
         <div className="App" style={{ width: "100vw" }}>
             <React.StrictMode>
-                <BrowserRouter>
+                <BrowserRouter basename={`/${process.env.PUBLIC_URL}`}>
                     <Stack style={{ width: "100vw" }}>
                         <Box sx={{ flexGrow: 1 }}>
                             <AppBar position="static">
@@ -41,7 +43,7 @@ function App() {
                                 </Toolbar>
                             </AppBar>
                         </Box>
-                        <Stack display="flex" justifyContent='center'>
+                        <Stack display="flex" justifyContent="center">
                             <AppContainer />
                         </Stack>
                     </Stack>

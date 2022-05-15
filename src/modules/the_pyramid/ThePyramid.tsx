@@ -26,6 +26,18 @@ interface Pyramid extends RawNodeDatum {
     attributes: IAttribute;
 }
 
+interface IRectangleSvg {
+    width: number;
+    height: number;
+    tl: number;
+    tr: number;
+    br: number;
+    bl: number;
+    color: string;
+    x?: number;
+    y?: number;
+}
+
 const LEFT = 0;
 const CENTER = 1;
 const RIGHT = 2;
@@ -79,6 +91,7 @@ const PERCENT_TO_OWNER = 20;
 // };
 
 const ThePyramid = () => {
+    console.debug("Pyramid Component loaded");
     const [currentCycle, setCurrentCycle] = useState<number>(1);
     const [orgChart, setOrgChart] = useState<Pyramid>();
     const [numOfParticipants, setNumOfParticipants] = useState<number>(200);
@@ -291,20 +304,46 @@ const ThePyramid = () => {
         console.log(orgChart);
     }
 
+    const Rect = ({ width, height, tl, tr, br, bl, color, x, y }: IRectangleSvg) => {
+        const top = width - tl - tr;
+        const right = height - tr - br;
+        const bottom = width - br - bl;
+        const left = height - bl - tl;
+        const d = `
+            M${tl},0
+            h${top}
+            a${tr},${tr} 0 0 1 ${tr},${tr}
+            v${right}
+            a${br},${br} 0 0 1 -${br},${br}
+            h-${bottom}
+            a${bl},${bl} 0 0 1 -${bl},-${bl}
+            v-${left}
+            a${tl},${tl} 0 0 1 ${tl},-${tl}
+            z
+        `;
+        return (
+            <svg width={width} height={height} x={x} y={y}>
+                <path d={d} fill={color} />
+            </svg>
+        );
+    };
+
     function renderCustomNode(props: CustomNodeElementProps) {
         return (
             <g>
-                <rect width="20" height="20" x="-10" onClick={props.toggleNode} />
-                <text fill="black" strokeWidth="1" x="20">
+                <Rect x={-15} y={-10} width={30} height={30} tl={7} tr={7} bl={7} br={7} color="#1976d2" />
+
+                <text fill="black" strokeWidth="1" x="10" y="-15">
                     {props.nodeDatum.name}
                 </text>
                 {props.nodeDatum.attributes?.name && (
-                    <text fill="black" x="20" dy="20" strokeWidth="1">
+                    <text fill="black" x="30" dy="40" strokeWidth="1">
                         name: {props.nodeDatum.attributes?.name}
                     </text>
                 )}
-                <text fill="black" x="20" dy="20" strokeWidth="1">
-                    Money: {props.nodeDatum.attributes?.money}
+                <Rect width={125} height={60} tl={7} tr={7} bl={7} br={7} color="white" x={-50} y={25} />
+                <text fill="black" x={-45} dy="45" strokeWidth="1">
+                    Money: {Number(props.nodeDatum.attributes?.money).toFixed(2)}
                 </text>
             </g>
         );
@@ -326,6 +365,7 @@ const ThePyramid = () => {
                         renderCustomNodeElement={renderCustomNode}
                         data={orgChart as Pyramid}
                         orientation="vertical"
+                        pathFunc="elbow"
                     />
                 ) : (
                     <CircularProgress />
