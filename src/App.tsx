@@ -27,7 +27,7 @@ function App() {
                 <BrowserRouter basename={`/${process.env.PUBLIC_URL}`}>
                     <Stack style={{ width: "100vw" }}>
                         <Box sx={{ flexGrow: 1 }}>
-                            <AppBar position="static">
+                            <AppBar position="static" style={{ backgroundColor: "#ff9800" }}>
                                 <Toolbar>
                                     <IconButton
                                         size="large"
