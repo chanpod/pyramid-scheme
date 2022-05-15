@@ -8,6 +8,7 @@ import useInterval from "../../hooks/useInterval";
 import { useTimer } from "react-timer-hook";
 import Progress from "./Progress";
 import numeral from "numeral";
+import { Money } from "@mui/icons-material";
 
 interface IAttribute extends Record<string, string | number | boolean> {
     money: number;
@@ -333,17 +334,13 @@ const ThePyramid = () => {
             <g>
                 <Rect x={-15} y={-10} width={30} height={30} tl={7} tr={7} bl={7} br={7} color="#1976d2" />
 
-                <text fill="black" strokeWidth="1" x="10" y="-15">
+                <text font-family="Arial, Helvetica, sans-serif" fill="black" strokeWidth="1" x="10" y="-15">
                     {props.nodeDatum.name}
                 </text>
-                {props.nodeDatum.attributes?.name && (
-                    <text fill="black" x="30" dy="40" strokeWidth="1">
-                        name: {props.nodeDatum.attributes?.name}
-                    </text>
-                )}
+                
                 <Rect width={125} height={60} tl={7} tr={7} bl={7} br={7} color="white" x={-50} y={25} />
-                <text fill="black" x={-45} dy="45" strokeWidth="1">
-                    Money: {Number(props.nodeDatum.attributes?.money).toFixed(2)}
+                <text font-family="Arial, Helvetica, sans-serif" fill="black" x={-45} dy="45" strokeWidth="1">
+                    ${Number(props.nodeDatum.attributes?.money).toFixed(2)}
                 </text>
             </g>
         );
