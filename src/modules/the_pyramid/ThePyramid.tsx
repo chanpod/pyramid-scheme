@@ -1,7 +1,7 @@
 import { Button, CircularProgress, Stack, TextField, Typography } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import Tree from "react-d3-tree";
-import { RawNodeDatum } from "react-d3-tree/lib/types/common";
+import { CustomNodeElementProps, RawNodeDatum } from "react-d3-tree/lib/types/common";
 import { uniqueNamesGenerator, names } from "unique-names-generator";
 import { nth, remove } from "lodash";
 import useInterval from "../../hooks/useInterval";
@@ -30,7 +30,7 @@ const LEFT = 0;
 const CENTER = 1;
 const RIGHT = 2;
 const CHILDREN_SIZE = 3;
-const CYCLE_INCOME = 500;
+const CYCLE_INCOME = 2000;
 const INTERVAL_TIME = 15;
 const PERCENT_TO_OWNER = 20;
 // This is a simplified example of an org chart with a depth of 2.
@@ -110,7 +110,7 @@ const ThePyramid = () => {
     function timerExpired() {
         const newPyramid = setIncome(orgChart as Pyramid);
         setOrgChart(newPyramid);
-        setCurrentCycle(currentCycle + 1)
+        setCurrentCycle(currentCycle + 1);
         setTimeout(() => {
             restartInterval();
         }, CYCLE_INCOME);
@@ -195,19 +195,6 @@ const ThePyramid = () => {
     function initializeChildren(children: TreeNode[] | undefined): TreeNode[] {
         const newChildren: TreeNode[] = [];
         if (children?.length === 0 || children === undefined) {
-            // newChildren.push({
-            //     name: "",
-            //     attributes: getDefaultAttributes(),
-            // });
-            // newChildren.push({
-            //     name: "",
-            //     attributes: getDefaultAttributes(),
-            // });
-            // newChildren.push({
-            //     name: "",
-            //     attributes: getDefaultAttributes(),
-            // });
-
             return newChildren;
         } else {
             return children;
@@ -284,13 +271,13 @@ const ThePyramid = () => {
     }
 
     function buildPyramid() {
-        setCurrentCycle(1)
+        setCurrentCycle(1);
         const numOfPeople = numOfParticipants;
         const initialOrg: Pyramid = {
             name: "First Org",
             attributes: {
                 income: 0,
-                money: 500,
+                money: CYCLE_INCOME,
                 rootNode: true,
             },
             children: [],
@@ -304,6 +291,25 @@ const ThePyramid = () => {
         console.log(orgChart);
     }
 
+    function renderCustomNode(props: CustomNodeElementProps) {
+        return (
+            <g>
+                <rect width="20" height="20" x="-10" onClick={props.toggleNode} />
+                <text fill="black" strokeWidth="1" x="20">
+                    {props.nodeDatum.name}
+                </text>
+                {props.nodeDatum.attributes?.name && (
+                    <text fill="black" x="20" dy="20" strokeWidth="1">
+                        name: {props.nodeDatum.attributes?.name}
+                    </text>
+                )}
+                <text fill="black" x="20" dy="20" strokeWidth="1">
+                    Money: {props.nodeDatum.attributes?.money}
+                </text>
+            </g>
+        );
+    }
+
     useEffect(() => {
         buildPyramid();
     }, []);
@@ -311,12 +317,16 @@ const ThePyramid = () => {
     return (
         <>
             <Stack>
-                <Typography variant = "h6">Next Cycle {currentCycle + 1}</Typography>
+                <Typography variant="h6">Next Cycle {currentCycle + 1}</Typography>
                 <Progress duration={INTERVAL_TIME} timeLeft={seconds} text="test" />
             </Stack>
             <div id="treeWrapper" style={{ width: "100%", height: "60vh" }}>
                 {orgChart && orgChart?.children?.length > 0 ? (
-                    <Tree data={orgChart as Pyramid} orientation="vertical" />
+                    <Tree
+                        renderCustomNodeElement={renderCustomNode}
+                        data={orgChart as Pyramid}
+                        orientation="vertical"
+                    />
                 ) : (
                     <CircularProgress />
                 )}

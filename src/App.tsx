@@ -35,9 +35,9 @@ function App() {
                                         sx={{ mr: 2 }}
                                     ></IconButton>
                                     <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                                        News
+                                        Pyramid Scheme
                                     </Typography>
-                                    <Button color="inherit">Login</Button>
+                                    {/* <Button color="inherit">Login</Button> */}
                                 </Toolbar>
                             </AppBar>
                         </Box>
