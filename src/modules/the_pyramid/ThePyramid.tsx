@@ -97,6 +97,7 @@ const ThePyramid = () => {
     const [orgChart, setOrgChart] = useState<Pyramid>();
     const [numOfParticipants, setNumOfParticipants] = useState<number>(200);
     const [percentDistributions, setPercentDistributions] = useState<number>(20);
+    const [incomePerCycle, setIncomePerCycle] = useState<number>(2000);
 
     const { seconds, minutes, hours, days, isRunning, start, pause, resume, restart } = useTimer({
         expiryTimestamp: new Date(),
@@ -128,7 +129,7 @@ const ThePyramid = () => {
         setCurrentCycle(currentCycle + 1);
         setTimeout(() => {
             restartInterval();
-        }, CYCLE_INCOME);
+        }, 500);
     }
 
     function addIncomeToMoneyToChild(node: TreeNode[] | Pyramid[], direction: number) {
@@ -175,7 +176,7 @@ const ThePyramid = () => {
         }
 
         const percentReduction = percentDistributions / 100;
-        const income = CYCLE_INCOME + childrensIncome * percentReduction;
+        const income = incomePerCycle + childrensIncome * percentReduction;
         clonedPyramid.attributes.income += Number(numeral(income).format("0.00"));
         addIncomeToMoneyToChild(children, LEFT);
         addIncomeToMoneyToChild(children, CENTER);
@@ -189,7 +190,7 @@ const ThePyramid = () => {
 
     function getDefaultAttributes(): IAttribute {
         return {
-            money: CYCLE_INCOME,
+            money: incomePerCycle,
             income: 0,
         } as IAttribute;
     }
@@ -197,7 +198,7 @@ const ThePyramid = () => {
     function generatePerson(): TreeNode {
         return {
             attributes: {
-                money: CYCLE_INCOME,
+                money: incomePerCycle,
                 income: 0,
             },
             name: uniqueNamesGenerator({
@@ -292,7 +293,7 @@ const ThePyramid = () => {
             name: "CEO",
             attributes: {
                 income: 0,
-                money: CYCLE_INCOME,
+                money: incomePerCycle,
                 rootNode: true,
             },
             children: [],
@@ -395,6 +396,15 @@ const ThePyramid = () => {
                                 onChange={(event: any) => setPercentDistributions(Number(event.target.value))}
                                 type="number"
                                 value={percentDistributions}
+                            />
+                            <TextField
+                                label="Income Per Cycle"
+                                onChange={(event: any) => setIncomePerCycle(Number(event.target.value))}
+                                InputProps={{
+                                    startAdornment: '$'
+                                }}
+                                type="number"
+                                value={incomePerCycle}
                             />
                         </Stack>
                     </Stack>
