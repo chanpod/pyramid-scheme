@@ -1,7 +1,7 @@
 {
   "files": {
     "main.css": "/pyramid-scheme/static/css/main.ce4aafb6.css",
-    "main.js": "/pyramid-scheme/static/js/main.194d953b.js",
+    "main.js": "/pyramid-scheme/static/js/main.1f15b1d8.js",
     "static/js/787.d4d83d7a.chunk.js": "/pyramid-scheme/static/js/787.d4d83d7a.chunk.js",
     "static/media/roboto-all-500-normal.woff": "/pyramid-scheme/static/media/roboto-all-500-normal.52cb737b682eb9661ee1.woff",
     "static/media/roboto-all-700-normal.woff": "/pyramid-scheme/static/media/roboto-all-700-normal.ef6d1d09b20b877fee4e.woff",
@@ -37,11 +37,11 @@
     "static/media/roboto-greek-ext-700-normal.woff2": "/pyramid-scheme/static/media/roboto-greek-ext-700-normal.9674bc0ae12c2551d9d1.woff2",
     "index.html": "/pyramid-scheme/index.html",
     "main.ce4aafb6.css.map": "/pyramid-scheme/static/css/main.ce4aafb6.css.map",
-    "main.194d953b.js.map": "/pyramid-scheme/static/js/main.194d953b.js.map",
+    "main.1f15b1d8.js.map": "/pyramid-scheme/static/js/main.1f15b1d8.js.map",
     "787.d4d83d7a.chunk.js.map": "/pyramid-scheme/static/js/787.d4d83d7a.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.ce4aafb6.css",
-    "static/js/main.194d953b.js"
+    "static/js/main.1f15b1d8.js"
   ]
 }
