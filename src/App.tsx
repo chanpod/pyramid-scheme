@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import styled from "styled-components";
-import PyramidGraph from "./components/PyramidGraph";
+import PyramidFlowGraph from "./components/PyramidFlowGraph";
 import PlayerStatsDisplay from "./components/PlayerStats";
 import ActionPanel from "./components/ActionPanel";
 import GameOver from "./components/GameOver";
@@ -10,7 +10,7 @@ import { getNodesAbove, getNodesBelow } from "./utils/pyramidGenerator";
 import { PyramidNode } from "./types";
 
 const AppContainer = styled.div`
-  max-width: 1200px;
+  max-width: 1800px;
   margin: 0 auto;
   padding: 20px;
   font-family: 'Arial', sans-serif;
@@ -20,7 +20,7 @@ const AppContainer = styled.div`
 `;
 
 const Header = styled.header`
-  margin-bottom: 30px;
+  margin-bottom: 20px;
   text-align: center;
   padding: 15px 0;
   border-bottom: 1px solid #eee;
@@ -38,28 +38,28 @@ const Subtitle = styled.p`
   margin-top: 0;
 `;
 
-const FlexContainer = styled.div`
-  display: flex;
+const GameContainer = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 3fr 1fr;
   gap: 20px;
-  margin-top: 20px;
-  flex-wrap: wrap;
-  flex: 1; /* Take available space */
+  flex: 1;
   
-  @media (max-width: 992px) {
-    flex-direction: column;
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr;
   }
 `;
 
-const LeftColumn = styled.div`
-  flex: 3; /* Give the graph more space */
-  min-width: 300px;
+const LeftPanel = styled.div`
   display: flex;
   flex-direction: column;
 `;
 
-const RightColumn = styled.div`
-  flex: 2; /* Give the controls less space */
-  min-width: 300px;
+const CenterPanel = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const RightPanel = styled.div`
   display: flex;
   flex-direction: column;
 `;
@@ -159,16 +159,8 @@ function App() {
 				</HeaderControls>
 			</Header>
 
-			<FlexContainer>
-				<LeftColumn>
-					<PyramidGraph
-						pyramid={gameState.pyramid}
-						onNodeClick={handleNodeClick}
-						selectedNodeId={selectedNodeId || undefined}
-					/>
-				</LeftColumn>
-
-				<RightColumn>
+			<GameContainer>
+				<LeftPanel>
 					<PlayerStatsDisplay
 						stats={gameState.player}
 						lastDailyEnergyBonus={gameState.lastDailyEnergyBonus}
@@ -176,23 +168,30 @@ function App() {
 						pyramid={gameState.pyramid}
 						playerNodeId={playerNode?.id || null}
 					/>
+				</LeftPanel>
 
-					<ActionPanel
-						dispatch={dispatch}
-						selectedNodeId={selectedNodeId}
-						playerNode={playerNode}
-						selectedNode={selectedNode}
-						playerStats={gameState.player}
+				<CenterPanel>
+					<PyramidFlowGraph
+						pyramid={gameState.pyramid}
+						onNodeClick={handleNodeClick}
+						selectedNodeId={selectedNodeId || undefined}
 						canMoveUp={canMoveUp}
 						canRecruit={canRecruit}
-						nodesAbove={nodesAbove}
-						nodesBelow={nodesBelow}
+						playerStats={gameState.player}
+						dispatch={dispatch}
+					/>
+				</CenterPanel>
+
+				<RightPanel>
+					<ActionPanel
+						dispatch={dispatch}
+						playerStats={gameState.player}
 						gameDay={gameState.gameDay}
 						gameHour={gameState.gameHour}
 						pendingRecruits={gameState.pendingRecruits}
 					/>
-				</RightColumn>
-			</FlexContainer>
+				</RightPanel>
+			</GameContainer>
 
 			{gameState.gameOver && (
 				<GameOver

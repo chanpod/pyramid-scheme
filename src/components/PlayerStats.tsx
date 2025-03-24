@@ -27,6 +27,7 @@ const StatsContainer = styled.div`
   margin-bottom: 20px;
   position: relative;
   min-height: 280px; /* Set minimum height to prevent UI jumping */
+  height: 100%;
 `;
 
 const StatGrid = styled.div`
@@ -153,6 +154,28 @@ const LevelBadge = styled.div`
   font-weight: bold;
   font-size: 18px;
   box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+  margin-right: 15px;
+`;
+
+const PlayerLevelInfo = styled.div`
+  display: flex;
+  align-items: center;
+`;
+
+const CurrentLevel = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const LevelLabel = styled.span`
+  font-size: 14px;
+  color: #666;
+`;
+
+const LevelValue = styled.span`
+  font-size: 20px;
+  font-weight: bold;
+  color: #333;
 `;
 
 const EnergyBonus = styled.div`
@@ -253,10 +276,12 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 			<Title>Your Stats</Title>
 			<PlayerInfo>
 				<LevelBadge>{stats.level}</LevelBadge>
-				<div style={{ marginLeft: "15px" }}>
-					<StatLabel>Current Level</StatLabel>
-					<StatValue>Level {stats.level}</StatValue>
-				</div>
+				<PlayerLevelInfo>
+					<CurrentLevel>
+						<LevelLabel>Current Level</LevelLabel>
+						<LevelValue>Level {stats.level}</LevelValue>
+					</CurrentLevel>
+				</PlayerLevelInfo>
 			</PlayerInfo>
 
 			<StatGrid>

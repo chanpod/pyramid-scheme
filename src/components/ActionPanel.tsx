@@ -1,23 +1,14 @@
 import React from "react";
 import styled from "styled-components";
-import { GameAction, PyramidNode, PlayerStats } from "../types";
+import { GameAction, PlayerStats } from "../types";
 
 // Define constants here to match the ones in useGameState.ts
 const ENERGY_COST = 800;
 const MAX_ENERGY = 20;
-const MONEY_RECRUITMENT_FACTOR = 0.0001; // How much money affects recruitment (0.0001 = +1% per $100)
-const BASE_RECRUITMENT_CHANCE = 0.08; // Base recruitment success chance (8%)
 
 interface ActionPanelProps {
 	dispatch: React.Dispatch<GameAction>;
-	selectedNodeId: string | null;
-	playerNode: PyramidNode | null;
-	selectedNode: PyramidNode | null;
 	playerStats: PlayerStats;
-	canMoveUp: boolean;
-	canRecruit: boolean;
-	nodesAbove: PyramidNode[];
-	nodesBelow: PyramidNode[];
 	gameDay: number;
 	gameHour: number;
 	pendingRecruits: { nodeId: string; chance: number }[];
@@ -32,52 +23,43 @@ const PanelContainer = styled.div`
 	min-height: 500px; /* Set minimum height to prevent UI jumping */
 `;
 
-const ActionButton = styled.button<{ disabled?: boolean }>`
-	background-color: ${(props) => (props.disabled ? "#e0e0e0" : "#2196F3")};
-	color: ${(props) => (props.disabled ? "#999" : "white")};
-	border: none;
+const ActionButton = styled.button<{ disabled?: boolean; primary?: boolean }>`
+	background-color: ${(props) => {
+		if (props.disabled) return "#e0e0e0";
+		if (props.primary) return "#2196F3";
+		return "#f5f5f5";
+	}};
+	color: ${(props) => {
+		if (props.disabled) return "#999";
+		if (props.primary) return "white";
+		return "#333";
+	}};
+	border: ${(props) => (props.primary ? "none" : "1px solid #ddd")};
 	border-radius: 4px;
 	padding: 10px 15px;
 	font-weight: bold;
 	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
 	margin-right: 10px;
 	margin-bottom: 10px;
-	transition: background-color 0.2s;
-	
-	&:hover {
-		background-color: ${(props) => (props.disabled ? "#e0e0e0" : "#1976D2")};
-	}
-`;
-
-// More compact button style for upgrades
-const UpgradeButton = styled.button<{ disabled?: boolean }>`
-	background-color: ${(props) => (props.disabled ? "#f0f0f0" : "#f5f5f5")};
-	color: ${(props) => (props.disabled ? "#aaa" : "#333")};
-	border: 1px solid ${(props) => (props.disabled ? "#e0e0e0" : "#ddd")};
-	border-radius: 4px;
-	padding: 8px 12px;
-	font-size: 13px;
-	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
-	margin-bottom: 8px;
 	transition: all 0.2s;
 	display: flex;
-	justify-content: space-between;
 	align-items: center;
-	width: 100%;
+	justify-content: center;
 	
 	&:hover {
-		background-color: ${(props) => (props.disabled ? "#f0f0f0" : "#e8f4fd")};
-		border-color: ${(props) => (props.disabled ? "#e0e0e0" : "#2196F3")};
+		background-color: ${(props) => {
+			if (props.disabled) return "#e0e0e0";
+			if (props.primary) return "#1976D2";
+			return "#e8f4fd";
+		}};
+		transform: ${(props) => (props.disabled ? "none" : "translateY(-2px)")};
+		box-shadow: ${(props) => (props.disabled ? "none" : "0 4px 8px rgba(0, 0, 0, 0.1)")};
 	}
 `;
 
-const ButtonLabel = styled.span`
-	font-weight: bold;
-`;
-
-const ButtonCost = styled.span`
-	color: #666;
-	font-size: 12px;
+const ActionIcon = styled.span`
+	margin-right: 8px;
+	font-size: 16px;
 `;
 
 const StatusTag = styled.span<{ isAffordable?: boolean }>`
@@ -89,61 +71,11 @@ const StatusTag = styled.span<{ isAffordable?: boolean }>`
 	margin-left: 5px;
 `;
 
-const ActionGrid = styled.div`
-	display: grid;
-	grid-template-columns: repeat(2, 1fr);
-	gap: 10px;
-	margin-bottom: 20px;
-`;
-
-const UpgradeGrid = styled.div`
-	display: grid;
-	grid-template-columns: repeat(3, 1fr);
-	gap: 10px;
-	margin-bottom: 20px;
-`;
-
 const Title = styled.h2`
 	margin-top: 0;
 	margin-bottom: 15px;
 	color: #333;
 	font-size: 24px;
-`;
-
-const NodeInfo = styled.div`
-	background-color: #f5f5f5;
-	border-radius: 4px;
-	padding: 15px;
-	margin-bottom: 20px;
-`;
-
-const InfoTitle = styled.h3`
-	margin-top: 0;
-	margin-bottom: 10px;
-	color: #333;
-	font-size: 18px;
-`;
-
-const InfoText = styled.p`
-	margin: 5px 0;
-	color: #555;
-`;
-
-const SubTitle = styled.h3`
-	margin-top: 20px;
-	margin-bottom: 10px;
-	color: #333;
-	font-size: 18px;
-	display: flex;
-	align-items: center;
-	
-	&::after {
-		content: '';
-		flex: 1;
-		height: 1px;
-		background-color: #eee;
-		margin-left: 10px;
-	}
 `;
 
 const TimeDisplay = styled.div`
@@ -219,42 +151,62 @@ const ChanceLabel = styled.span`
 	color: #555;
 `;
 
+const GameActionCard = styled.div`
+	background-color: #f5f5f5;
+	border-radius: 8px;
+	padding: 15px;
+	margin-bottom: 15px;
+	transition: all 0.2s;
+	cursor: pointer;
+	
+	&:hover {
+		background-color: #e8f4fd;
+		transform: translateY(-2px);
+		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+	}
+`;
+
+const GameActionTitle = styled.h4`
+	margin-top: 0;
+	margin-bottom: 8px;
+	color: #333;
+	display: flex;
+	align-items: center;
+`;
+
+const GameActionDescription = styled.p`
+	margin: 0;
+	color: #666;
+	font-size: 14px;
+`;
+
+const GameActionCost = styled.div`
+	display: flex;
+	align-items: center;
+	margin-top: 10px;
+	color: #555;
+	font-size: 13px;
+	font-weight: bold;
+`;
+
+const InfoTitle = styled.h3`
+	margin-top: 0;
+	margin-bottom: 10px;
+	color: #333;
+	font-size: 18px;
+`;
+
 const ActionPanel: React.FC<ActionPanelProps> = ({
 	dispatch,
-	selectedNodeId,
-	playerNode,
-	selectedNode,
 	playerStats,
-	canMoveUp,
-	canRecruit,
-	nodesAbove,
-	nodesBelow,
 	gameDay,
 	gameHour,
 	pendingRecruits,
 }) => {
-	// Calculate required recruits to move up
-	const requiredRecruits =
-		selectedNode && canMoveUp ? 7 - selectedNode.level : 0;
-
-	// Calculate recruitment chance based on player stats for display purposes
-	const calculateRecruitmentChance = () => {
-		if (!selectedNode || !canRecruit) return 0;
-
-		// Recruiting power has the strongest effect
-		let baseChance =
-			BASE_RECRUITMENT_CHANCE + playerStats.recruitingPower * 0.06;
-		// Charisma no longer affects recruitment success
-		// Money provides a small boost
-		baseChance += playerStats.money * MONEY_RECRUITMENT_FACTOR;
-		// Add small base bonus
-		baseChance += 0.05;
-
-		// Cap at 90%
-		return Math.min(baseChance * 100, 90);
+	// Format the recruitment chance as a percentage
+	const formatChance = (chance: number) => {
+		return `${Math.floor(chance * 100)}%`;
 	};
-
-	const recruitmentChance = calculateRecruitmentChance();
 
 	// Format time for display (12-hour format with AM/PM)
 	const formatTime = (hour: number) => {
@@ -263,177 +215,95 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 		return `${displayHour}:00 ${period}`;
 	};
 
+	// Handle collect money action
+	const handleCollectMoney = () => {
+		if (playerStats.energy >= 1) {
+			dispatch({ type: "COLLECT_MONEY" });
+		}
+	};
+
+	// Handle short rest action
+	const handleShortRest = () => {
+		dispatch({ type: "REST", hours: 8 });
+	};
+
+	// Handle long rest action
+	const handleLongRest = () => {
+		dispatch({ type: "REST", hours: 16 });
+	};
+
 	return (
 		<PanelContainer>
-			<Title>Actions</Title>
-
+			<Title>Game Actions</Title>
 			<TimeDisplay>
 				Day {gameDay} - {formatTime(gameHour)}
+				{playerStats.isResting && " (Resting)"}
 			</TimeDisplay>
 
 			{playerStats.isResting && (
 				<RestingMessage>
-					You are resting. You will be able to take actions when you wake up.
+					You are currently resting. Your actions are limited until you finish
+					resting.
 				</RestingMessage>
 			)}
 
+			<Section>
+				<GameActionCard onClick={handleCollectMoney}>
+					<GameActionTitle>
+						<ActionIcon>💰</ActionIcon> Network Activation
+					</GameActionTitle>
+					<GameActionDescription>
+						Activate your network to generate money from your downline.
+					</GameActionDescription>
+					<GameActionCost>
+						<span>Cost: 1 Energy</span>
+						{playerStats.energy < 1 && (
+							<StatusTag isAffordable={false}>No Energy</StatusTag>
+						)}
+					</GameActionCost>
+				</GameActionCard>
+
+				<GameActionCard onClick={handleShortRest}>
+					<GameActionTitle>
+						<ActionIcon>🛌</ActionIcon> Power Nap
+					</GameActionTitle>
+					<GameActionDescription>
+						Take a short rest to recover some energy. Time will advance by 8
+						hours.
+					</GameActionDescription>
+					<GameActionCost>
+						<span>Gain: ~5-8 Energy</span>
+					</GameActionCost>
+				</GameActionCard>
+
+				<GameActionCard onClick={handleLongRest}>
+					<GameActionTitle>
+						<ActionIcon>😴</ActionIcon> Deep Rest
+					</GameActionTitle>
+					<GameActionDescription>
+						Take a longer rest to recover more energy. Time will advance by 16
+						hours.
+					</GameActionDescription>
+					<GameActionCost>
+						<span>Gain: ~12-16 Energy</span>
+					</GameActionCost>
+				</GameActionCard>
+			</Section>
+
 			{pendingRecruits.length > 0 && (
 				<PendingRecruitsInfo>
-					<InfoTitle>Pending Recruits</InfoTitle>
-					<InfoText>
-						You have {pendingRecruits.length} recruitment attempts in progress.
-					</InfoText>
-					<InfoText>Results will be available at the end of the day.</InfoText>
-
-					{/* Display each pending recruit with chance */}
-					<div style={{ marginTop: "10px" }}>
-						{pendingRecruits.map((recruit, index) => (
-							<PendingRecruitItem key={index}>
-								<span>Node #{recruit.nodeId.substring(0, 6)}</span>
-								<div style={{ display: "flex", alignItems: "center" }}>
-									<ChanceIndicator chance={recruit.chance * 100} />
-									<ChanceLabel>{Math.round(recruit.chance * 100)}%</ChanceLabel>
-								</div>
-							</PendingRecruitItem>
-						))}
-					</div>
+					<InfoTitle>Pending Recruitment Attempts</InfoTitle>
+					{pendingRecruits.map((recruit) => (
+						<PendingRecruitItem key={recruit.nodeId}>
+							<span>Node {recruit.nodeId.split("-")[1]}</span>
+							<div style={{ display: "flex", alignItems: "center" }}>
+								<ChanceIndicator chance={recruit.chance * 100} />
+								<ChanceLabel>{formatChance(recruit.chance)}</ChanceLabel>
+							</div>
+						</PendingRecruitItem>
+					))}
 				</PendingRecruitsInfo>
 			)}
-
-			{!playerStats.isResting &&
-				selectedNode &&
-				selectedNode.id !== playerNode?.id && (
-					<NodeInfo>
-						<InfoTitle>Selected Node Info</InfoTitle>
-						<InfoText>Level: {selectedNode.level}</InfoText>
-						<InfoText>Recruits: {selectedNode.recruits}</InfoText>
-						<InfoText>Money: ${selectedNode.money}</InfoText>
-						<InfoText>
-							Status: {selectedNode.ownedByPlayer ? "Owned" : "Not Owned"}
-						</InfoText>
-
-						{canMoveUp && (
-							<>
-								<InfoText>
-									Required Recruits to Move Up: {requiredRecruits}
-								</InfoText>
-								<ActionButton
-									disabled={
-										playerStats.recruits < requiredRecruits ||
-										playerStats.energy < 3
-									}
-									onClick={() =>
-										dispatch({ type: "MOVE_UP", targetNodeId: selectedNode.id })
-									}
-								>
-									Move Up (3 Energy)
-								</ActionButton>
-							</>
-						)}
-
-						{canRecruit && !selectedNode.ownedByPlayer && (
-							<>
-								<InfoText>
-									Recruitment Chance:{" "}
-									<strong
-										style={{
-											color:
-												recruitmentChance > 75
-													? "#4CAF50"
-													: recruitmentChance > 50
-														? "#8BC34A"
-														: recruitmentChance > 25
-															? "#FFC107"
-															: "#F44336",
-											fontSize: "16px",
-										}}
-									>
-										{Math.round(recruitmentChance)}%
-									</strong>
-									<ChanceIndicator
-										chance={recruitmentChance}
-										style={{
-											display: "inline-block",
-											width: "100px",
-											marginLeft: "10px",
-											verticalAlign: "middle",
-										}}
-									/>
-								</InfoText>
-								<InfoText
-									style={{ fontSize: "12px", color: "#666", marginTop: "-5px" }}
-								>
-									Based on:
-									<span style={{ color: "#1976D2", fontWeight: "bold" }}>
-										{" "}
-										Recruiting Power ({playerStats.recruitingPower}×6%)
-									</span>
-									,
-									<span style={{ color: "#FF9800", fontWeight: "bold" }}>
-										{" "}
-										Money (${playerStats.money}×
-										{MONEY_RECRUITMENT_FACTOR.toFixed(4)})
-									</span>
-									<span style={{ color: "#555", fontWeight: "normal" }}>
-										{" "}
-										+ {BASE_RECRUITMENT_CHANCE * 100}% base + 5% bonus
-									</span>
-								</InfoText>
-								<InfoText
-									style={{ fontSize: "12px", color: "#666", marginTop: "-5px" }}
-								>
-									<strong>Tip:</strong> Recruiting Power affects success rate,
-									Charisma only helps generate new potential recruits
-								</InfoText>
-								<ActionButton
-									disabled={playerStats.energy < 2}
-									onClick={() =>
-										dispatch({ type: "RECRUIT", targetNodeId: selectedNode.id })
-									}
-								>
-									Recruit (2 Energy)
-								</ActionButton>
-							</>
-						)}
-					</NodeInfo>
-				)}
-
-			<Section>
-				<SubTitle>General Actions</SubTitle>
-				<ActionGrid>
-					<ActionButton
-						disabled={playerStats.isResting || playerStats.energy < 1}
-						onClick={() => dispatch({ type: "COLLECT_MONEY" })}
-					>
-						Collect Money (1 Energy)
-					</ActionButton>
-
-					<ActionButton
-						disabled={playerStats.isResting}
-						onClick={() => dispatch({ type: "REST", hours: 8 })}
-					>
-						Short Rest (8 Hours)
-					</ActionButton>
-
-					<ActionButton
-						disabled={playerStats.isResting}
-						onClick={() => dispatch({ type: "REST", hours: 16 })}
-					>
-						Long Rest (16 Hours)
-					</ActionButton>
-				</ActionGrid>
-			</Section>
-
-			<Section>
-				<div style={{ textAlign: "right", marginTop: "10px" }}>
-					<ActionButton
-						onClick={() => dispatch({ type: "RESET_GAME" })}
-						style={{ backgroundColor: "#f44336", marginRight: 0 }}
-					>
-						Reset Game
-					</ActionButton>
-				</div>
-			</Section>
 		</PanelContainer>
 	);
 };
