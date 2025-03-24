@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import styled from "styled-components";
 import { PyramidNode, Product } from "../types";
 
@@ -12,29 +12,36 @@ interface NodePopoverProps {
 	products?: Product[];
 }
 
-const PopoverContainer = styled.div<{ x: number; y: number }>`
-  position: absolute;
+const PopoverContainer = styled.div<{
+	x: number;
+	y: number;
+	isTopLevel?: boolean;
+}>`
+  position: fixed;
   left: ${(props) => props.x}px;
-  top: ${(props) => props.y - 30}px;
+  top: ${(props) => props.y}px;
   background-color: white;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   padding: 15px;
   width: 280px;
-  z-index: 10;
-  transform: translate(-50%, -100%);
+  z-index: 1000;
+  transform: translate(-50%, ${(props) => (props.isTopLevel ? "20px" : "-110%")});
+  max-height: 80vh;
+  overflow-y: auto;
   
   &::after {
     content: '';
     position: absolute;
-    bottom: -10px;
+    ${(props) => (props.isTopLevel ? "top: -10px" : "bottom: -10px")};
     left: 50%;
     transform: translateX(-50%);
     width: 0;
     height: 0;
     border-left: 10px solid transparent;
     border-right: 10px solid transparent;
-    border-top: 10px solid white;
+    border-top: ${(props) => (props.isTopLevel ? "transparent" : "10px solid white")};
+    border-bottom: ${(props) => (props.isTopLevel ? "10px solid white" : "transparent")};
   }
 `;
 
@@ -225,6 +232,52 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 	const [activeTab, setActiveTab] = useState("info");
 	const [selectedProduct, setSelectedProduct] = useState("");
 	const [quantity, setQuantity] = useState(1);
+	const popoverRef = useRef<HTMLDivElement>(null);
+
+	// Determine if this is a top-level node (level 1-2)
+	const isTopLevel = node.level <= 2;
+
+	// When the popover mounts or position changes, check if it's visible within viewport
+	useEffect(() => {
+		const popover = popoverRef.current;
+		if (!popover) return;
+
+		// Wait for the next frame to ensure the popover has been rendered with its dimensions
+		requestAnimationFrame(() => {
+			const rect = popover.getBoundingClientRect();
+			const viewportWidth = window.innerWidth;
+			const viewportHeight = window.innerHeight;
+
+			// Check if we're out of bounds
+			let isOutOfBounds = false;
+			const margin = 20; // Safety margin
+
+			// Check horizontal bounds
+			if (rect.left < margin) {
+				// Too far left
+				isOutOfBounds = true;
+				console.log("Popover too far left", rect.left);
+			} else if (rect.right > viewportWidth - margin) {
+				// Too far right
+				isOutOfBounds = true;
+				console.log("Popover too far right", rect.right, viewportWidth);
+			}
+
+			// Check vertical bounds - only for non-top level nodes
+			// For top-level nodes, we're displaying below the node, so don't check top bounds
+			if (!isTopLevel && rect.top < margin) {
+				// Too high - this is common with nodes at top of pyramid
+				isOutOfBounds = true;
+				console.log("Popover too high", rect.top);
+			}
+
+			// If we're out of bounds, we should close the popover to prevent inaccessibility
+			if (isOutOfBounds) {
+				console.log("Popover out of bounds, closing");
+				onClose();
+			}
+		});
+	}, [onClose, isTopLevel]); // Add isTopLevel as dependency
 
 	// Generate node title based on node properties
 	const getNodeTitle = () => {
@@ -359,7 +412,12 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 	const availableSpace = calculateAvailableSpace();
 
 	return (
-		<PopoverContainer x={position.x} y={position.y}>
+		<PopoverContainer
+			x={position.x}
+			y={position.y}
+			ref={popoverRef}
+			isTopLevel={isTopLevel}
+		>
 			<PopoverHeader>
 				<PopoverTitle>{getNodeTitle()}</PopoverTitle>
 				<CloseButton onClick={onClose}>×</CloseButton>

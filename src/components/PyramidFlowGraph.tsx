@@ -161,25 +161,80 @@ const PyramidFlowInner = ({
 
 	// Handle node click to show popover with node information
 	const handleNodeClick = useCallback(
-		(nodeId: string, position: { x: number; y: number }) => {
+		(
+			nodeId: string,
+			position: { x: number; y: number },
+			event?: React.MouseEvent,
+		) => {
 			// Call original onNodeClick handler
 			onNodeClick(nodeId);
 
-			// Use viewport coordinates from reactflow instance for better positioning
-			const node = reactFlowInstance.getNode(nodeId);
-			if (node) {
-				// Get viewport coordinates based on node's center point
-				const { x, y } = reactFlowInstance.project({
-					x: node.position.x + (node.width || 0) / 2,
-					y: node.position.y,
-				});
+			// Find node data to check if this is a player node
+			const nodeData = pyramid.nodes.find((n) => n.id === nodeId);
+			if (!nodeData) return;
 
-				// Set popover position and show it
-				setPopoverPosition({ x, y });
+			// Get the flow container to ensure we're within bounds
+			const reactFlowBounds = document
+				.querySelector(".react-flow")
+				?.getBoundingClientRect();
+
+			if (!reactFlowBounds) return;
+
+			// If we have a mouse event, use its position instead of calculating from the node
+			if (event) {
+				const mouseX = event.clientX;
+				const mouseY = event.clientY;
+
+				// Apply bounds checking for the mouse position
+				const horizontalMargin = 160; // Half of popover width + safety margin
+
+				// Ensure x is within horizontal bounds
+				let safeX = mouseX;
+				safeX = Math.max(reactFlowBounds.left + horizontalMargin, safeX);
+				safeX = Math.min(reactFlowBounds.right - horizontalMargin, safeX);
+
+				// Set position and show popover at mouse location
+				setPopoverPosition({ x: safeX, y: mouseY });
 				setShowPopover(true);
+				return;
 			}
+
+			// Fallback to node-based positioning if no mouse event is available
+			const node = reactFlowInstance.getNode(nodeId);
+			if (!node) return;
+
+			// Find node's center point and project to screen coordinates
+			const { x, y } = reactFlowInstance.project({
+				x: node.position.x + (node.width || 0) / 2,
+				y: node.position.y,
+			});
+
+			// Safety margin to keep popover in bounds
+			const horizontalMargin = 160; // A bit more than half the popover width (280px)
+
+			// Calculate safe x-position (prevent popover from going offscreen)
+			let safeX = x;
+
+			// Ensure x is at least horizontalMargin from the left edge
+			safeX = Math.max(reactFlowBounds.left + horizontalMargin, safeX);
+			// Ensure x is at most horizontalMargin from the right edge
+			safeX = Math.min(reactFlowBounds.right - horizontalMargin, safeX);
+
+			// Special adjustment for x-position of nodes at the edges
+			const edgeMargin = 50;
+			if (x < reactFlowBounds.left + edgeMargin) {
+				// Node is at the left edge, move popover right
+				safeX = reactFlowBounds.left + horizontalMargin;
+			} else if (x > reactFlowBounds.right - edgeMargin) {
+				// Node is at the right edge, move popover left
+				safeX = reactFlowBounds.right - horizontalMargin;
+			}
+
+			// Set position and show popover
+			setPopoverPosition({ x: safeX, y });
+			setShowPopover(true);
 		},
-		[onNodeClick, reactFlowInstance],
+		[onNodeClick, reactFlowInstance, pyramid.nodes],
 	);
 
 	// Convert pyramid nodes to React Flow nodes
@@ -245,7 +300,8 @@ const PyramidFlowInner = ({
 				data: {
 					...node,
 					isSelected: node.id === selectedNodeId,
-					onClick: () => handleNodeClick(node.id, { x, y }),
+					onClick: (event: React.MouseEvent) =>
+						handleNodeClick(node.id, { x, y }, event),
 				},
 			};
 		});
@@ -463,16 +519,31 @@ const PyramidFlowInner = ({
 					</button>
 				</Panel>
 
+				{/* Custom implementation of popover that's more reliable than the built-in one */}
 				{showPopover && selectedNode && (
-					<NodePopover
-						node={selectedNode}
-						position={popoverPosition}
-						onClose={() => setShowPopover(false)}
-						canMoveUp={canMoveUp}
-						playerStats={playerStats}
-						dispatch={dispatch}
-						products={products}
-					/>
+					<div
+						style={{
+							position: "absolute",
+							top: 0,
+							left: 0,
+							width: "100%",
+							height: "100%",
+							pointerEvents: "none",
+							zIndex: 10,
+						}}
+					>
+						<div style={{ position: "absolute", pointerEvents: "all" }}>
+							<NodePopover
+								node={selectedNode}
+								position={popoverPosition}
+								onClose={() => setShowPopover(false)}
+								canMoveUp={canMoveUp}
+								playerStats={playerStats}
+								dispatch={dispatch}
+								products={products}
+							/>
+						</div>
+					</div>
 				)}
 			</ReactFlow>
 		</GraphContainer>

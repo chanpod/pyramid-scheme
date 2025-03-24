@@ -20,14 +20,22 @@ const HOURS_PER_DAY = 24;
 const MAX_ENERGY = 20;
 const REST_ENERGY_PER_HOUR = 0.5; // Energy gained per hour of rest
 const ENERGY_COST = 800; // Cost to buy energy
+const INVENTORY_UPGRADE_COST = 1000; // Cost to upgrade inventory capacity (fairly expensive)
 export const PRODUCT_BUY_ENERGY_COST = 5; // Energy cost to buy products
-const NEW_RECRUIT_CHANCE = 0.08; // Chance for a successful recruit to generate new potential recruits (significantly reduced from 0.15)
-const MONEY_RECRUITMENT_FACTOR = 0.00005; // How much money affects recruitment (reduced from 0.00008)
-const BASE_RECRUITMENT_CHANCE = 0.12; // Base recruitment success chance (significantly reduced from 0.25)
 const AI_NODE_RECRUIT_CHANCE = 0.3; // Increased AI node recruitment chance to make competition harder
 const AI_NODE_EXPANSION_CHANCE = 0.4; // Increased AI expansion chance to make competition harder
-const DEFAULT_MAX_INVENTORY = 20; // Default maximum inventory capacity for nodes
+const DEFAULT_MAX_INVENTORY = 10; // Default maximum inventory capacity for nodes
 const NODE_RESTOCK_ENERGY_COST = 1; // Energy cost to restock a downstream node
+
+// Trading chance constants - easy to adjust
+const PLAYER_INVENTORY_TRADE_CHANCE = 0.5; // Chance for player to auto-trade inventory to downstream nodes
+const AI_INVENTORY_TRADE_CHANCE = 0.5; // Chance for AI to auto-trade inventory to downstream nodes
+
+// Selling chance constants - easy to adjust
+const NODE_RANDOM_SALE_CHANCE = 0.3; // Base chance for nodes to sell products to random customers
+const NODE_SALE_LEVEL_BONUS = 0.05; // Additional sale chance per level (higher levels sell better)
+const PLAYER_OWNED_SALE_BONUS = 0.1; // 10% bonus for player-owned nodes
+const CHARISMA_SALE_BONUS = 0.05; // 5% bonus per charisma point for player sales
 
 // Marketing event constants
 const SOCIAL_MEDIA_DURATION = 24; // 24 hours (1 day)
@@ -44,8 +52,6 @@ const WORKSHOP_SUCCESS_CHANCE = 0.75; // 75% base chance for workshop
 const WORKSHOP_EXTRA_RECRUIT_CHANCE = 0.1; // 10% chance for extra recruit in workshops
 
 // Investment multipliers for recruitment events
-const MIN_INVESTMENT = 50;
-const MAX_INVESTMENT = 500;
 const INVESTMENT_SUCCESS_MULTIPLIER = 0.0005; // 0.05% per dollar invested
 const INVESTMENT_ATTEMPTS_MULTIPLIER = 0.002; // 0.2% per dollar invested
 
@@ -63,6 +69,7 @@ const initialPlayerStats: PlayerStats = {
 	restUntil: 0,
 	recoveryPercentage: undefined,
 	inventory: {},
+	maxInventory: DEFAULT_MAX_INVENTORY,
 	totalSalesRandom: 0,
 	totalSalesDownstream: 0,
 };
@@ -211,6 +218,7 @@ const createInitialGameState = (): GameState => {
 		restUntil: 0,
 		recoveryPercentage: undefined,
 		inventory: {},
+		maxInventory: DEFAULT_MAX_INVENTORY,
 		totalSalesRandom: 0,
 		totalSalesDownstream: 0,
 	};
@@ -617,8 +625,9 @@ const ensureRecruitableNodesBelow = (
 };
 
 // Process day cycle - AI behaviors and passive game mechanics
+// Note: Auto-trading is limited by PLAYER_INVENTORY_TRADE_CHANCE and AI_INVENTORY_TRADE_CHANCE constants
+// Players should be incentivized to grow their network rather than relying solely on passive income
 const processDayCycle = (state: GameState): GameState => {
-	// Initialize variables for tracking changes
 	let updatedNodes = [...state.pyramid.nodes];
 	let updatedLinks = [...state.pyramid.links];
 	let newRecruits = state.player.recruits;
@@ -628,6 +637,8 @@ const processDayCycle = (state: GameState): GameState => {
 		links: updatedLinks,
 	};
 	let pyramidChanged = false;
+	// Track player commissions from downstream sales
+	let playerCommissions = 0;
 
 	// Debug log
 	console.log(
@@ -715,8 +726,11 @@ const processDayCycle = (state: GameState): GameState => {
 			if (productQuantity > 0) {
 				// Calculate sale chance based on node level and product
 				// Higher level nodes are better at selling
-				const levelBonus = (7 - node.level) * 0.02;
-				const saleChance = Math.min(0.7, product.baseChance + levelBonus);
+				const levelBonus = (7 - node.level) * NODE_SALE_LEVEL_BONUS;
+				const saleChance = Math.min(
+					0.7,
+					product.baseChance + NODE_RANDOM_SALE_CHANCE + levelBonus,
+				);
 
 				// Determine how many sales attempts to make based on inventory
 				const saleAttempts = Math.min(
@@ -873,8 +887,19 @@ const processDayCycle = (state: GameState): GameState => {
 			(node) => node.aiControlled && !node.isPlayerPosition,
 		);
 
-		// Random chance to attempt trades with downstream nodes (40% chance)
-		if (belowAINodes.length > 0 && Math.random() < 0.4) {
+		// Debug AI trading attempt
+		console.log(
+			`[DEBUG AI TRADING] AI Node ${aiNode.id} has ${Object.keys(aiNode.inventory || {}).length} product types`,
+		);
+		console.log(
+			`[DEBUG AI TRADING] Found ${belowAINodes.length} AI nodes below for potential trading`,
+		);
+
+		// Random chance to attempt trades with downstream nodes (using adjustable constant)
+		if (belowAINodes.length > 0 && Math.random() < AI_INVENTORY_TRADE_CHANCE) {
+			console.log(
+				`[DEBUG AI TRADING] Trade attempt passed random check (${AI_INVENTORY_TRADE_CHANCE * 100}% chance)`,
+			);
 			// Pick a random product to trade from inventory
 			const productsInInventory = Object.entries(aiNode.inventory || {})
 				.filter(([_, qty]) => (qty || 0) > 0)
@@ -962,113 +987,256 @@ const processDayCycle = (state: GameState): GameState => {
 	// 4. ADDED: Process player inventory trading
 	// Find player node and player-owned nodes with inventory
 	const playerNode = nodesAfterTrading.find((node) => node.isPlayerPosition);
-	if (playerNode && playerNode.inventory) {
+	console.log(
+		`[DEBUG TRADING] Player node found: ${!!playerNode}, Node ID: ${playerNode?.id}`,
+	);
+	console.log(
+		`[DEBUG TRADING] Player node inventory:`,
+		playerNode?.inventory ? JSON.stringify(playerNode.inventory) : "none",
+	);
+
+	// Check if player node exists in original state - this is important for comparison
+	const originalPlayerNode = state.pyramid.nodes.find(
+		(node) => node.isPlayerPosition,
+	);
+	console.log(
+		`[DEBUG TRADING] Original player node inventory:`,
+		originalPlayerNode?.inventory
+			? JSON.stringify(originalPlayerNode.inventory)
+			: "none",
+	);
+
+	if (playerNode?.inventory) {
 		// Find nodes directly below the player
 		const playerNodesBelow = getNodesBelow(updatedPyramid, playerNode.id);
 		const playerOwnedNodesBelow = playerNodesBelow.filter(
 			(node) => node.ownedByPlayer,
 		);
 
-		// Only attempt trades if player has downstream nodes and there's a 50% chance (higher than AI)
-		if (playerOwnedNodesBelow.length > 0 && Math.random() < 0.5) {
+		console.log(
+			`[DEBUG TRADING] Found ${playerOwnedNodesBelow.length} player-owned nodes below for potential trading`,
+		);
+
+		// Debug links to verify connections
+		console.log(`[DEBUG LINKS] Testing pyramid links`);
+		const playerLinks = updatedPyramid.links.filter(
+			(link) => link.target === playerNode.id || link.source === playerNode.id,
+		);
+		console.log(
+			`[DEBUG LINKS] Player node ${playerNode.id} has ${playerLinks.length} links:`,
+			JSON.stringify(playerLinks),
+		);
+
+		// Try to trade with a chance determined by the constant (easier to adjust)
+		if (
+			playerOwnedNodesBelow.length > 0 &&
+			Math.random() < PLAYER_INVENTORY_TRADE_CHANCE
+		) {
+			console.log(
+				`[DEBUG TRADING] Trade attempt passed random check (${PLAYER_INVENTORY_TRADE_CHANCE * 100}% chance)`,
+			);
 			// Get products that the player has in inventory
 			const playerProducts = Object.entries(playerNode.inventory)
 				.filter(([_, qty]) => (qty || 0) > 0)
 				.map(([id]) => id);
 
-			if (playerProducts.length > 0) {
-				// Pick a random product to trade
-				const randomProductId =
-					playerProducts[Math.floor(Math.random() * playerProducts.length)];
-				const product = state.products.find((p) => p.id === randomProductId);
+			console.log(
+				`[DEBUG TRADING] Player has ${playerProducts.length} product types in inventory for trading`,
+			);
 
-				if (product) {
-					// Pick a random downstream node to trade with
-					const targetNode =
-						playerOwnedNodesBelow[
-							Math.floor(Math.random() * playerOwnedNodesBelow.length)
-						];
-					const targetNodeIndex = nodesAfterTrading.findIndex(
-						(n) => n.id === targetNode.id,
+			if (playerProducts.length > 0) {
+				// Try to trade with each downstream node instead of just one random node
+				// This increases the chance of successful trades
+				let tradesMade = false;
+
+				// Sort nodes to prioritize ones with no inventory
+				const sortedNodes = [...playerOwnedNodesBelow].sort((a, b) => {
+					const aHasInventory =
+						a.inventory && Object.keys(a.inventory).length > 0;
+					const bHasInventory =
+						b.inventory && Object.keys(b.inventory).length > 0;
+					// Nodes without inventory come first
+					if (aHasInventory && !bHasInventory) return 1;
+					if (!aHasInventory && bHasInventory) return -1;
+					return 0;
+				});
+
+				console.log(
+					`[DEBUG TRADING] Prioritizing ${sortedNodes.length} nodes, favoring those without inventory`,
+				);
+
+				for (const targetNode of sortedNodes) {
+					// Skip if we've already done 3 trades
+					if (tradesMade) break;
+
+					// Pick a random product to trade
+					const randomProductId =
+						playerProducts[Math.floor(Math.random() * playerProducts.length)];
+					const product = state.products.find((p) => p.id === randomProductId);
+					const productQuantity = playerNode.inventory[randomProductId] || 0;
+
+					console.log(
+						`[DEBUG TRADING] Selected product ${product?.name} (ID: ${randomProductId}) for trading, quantity available: ${productQuantity}`,
 					);
 
-					if (targetNodeIndex >= 0) {
-						// Calculate available space
-						const targetInventory =
-							nodesAfterTrading[targetNodeIndex].inventory || {};
-						const totalTargetInventory = Object.values(targetInventory).reduce(
-							(sum, qty) => sum + qty,
-							0,
+					if (product && productQuantity > 0) {
+						const targetNodeIndex = nodesAfterTrading.findIndex(
+							(n) => n.id === targetNode.id,
 						);
-						const availableSpace =
-							nodesAfterTrading[targetNodeIndex].maxInventory -
-							totalTargetInventory;
 
-						if (availableSpace > 0) {
-							// Determine trade quantity (1-3 items)
-							const tradeQuantity = Math.min(
-								1 + Math.floor(Math.random() * 2),
-								playerNode.inventory[randomProductId] || 0,
-								availableSpace,
+						if (targetNodeIndex >= 0) {
+							// Calculate available space
+							const targetInventory =
+								nodesAfterTrading[targetNodeIndex].inventory || {};
+							const totalTargetInventory = Object.values(
+								targetInventory,
+							).reduce((sum, qty) => sum + qty, 0);
+							const availableSpace =
+								nodesAfterTrading[targetNodeIndex].maxInventory -
+								totalTargetInventory;
+
+							console.log(
+								`[DEBUG TRADING] Target node has ${availableSpace} available space out of ${nodesAfterTrading[targetNodeIndex].maxInventory} max inventory`,
 							);
 
-							if (tradeQuantity > 0) {
-								// Update player's inventory
-								const playerNodeIndex = nodesAfterTrading.findIndex(
-									(n) => n.id === playerNode.id,
+							if (availableSpace > 0) {
+								// Use a fixed trade quantity for reliability - at least 1 item
+								const tradeQuantity = Math.min(
+									2, // Always try to transfer 2 items
+									productQuantity,
+									availableSpace,
 								);
-								const updatedPlayerInventory = {
-									...nodesAfterTrading[playerNodeIndex].inventory,
-								};
-								updatedPlayerInventory[randomProductId] = Math.max(
-									0,
-									(updatedPlayerInventory[randomProductId] || 0) -
-										tradeQuantity,
-								);
-
-								// Update target node's inventory
-								const updatedTargetInventory = { ...targetInventory };
-								updatedTargetInventory[randomProductId] =
-									(updatedTargetInventory[randomProductId] || 0) +
-									tradeQuantity;
-
-								// Update player node
-								nodesAfterTrading[playerNodeIndex] = {
-									...nodesAfterTrading[playerNodeIndex],
-									inventory: updatedPlayerInventory,
-									lastUpdated: Date.now(),
-								};
-
-								// Update target node
-								nodesAfterTrading[targetNodeIndex] = {
-									...nodesAfterTrading[targetNodeIndex],
-									inventory: updatedTargetInventory,
-									lastUpdated: Date.now(),
-								};
 
 								console.log(
-									`[PLAYER TRADE] You traded ${tradeQuantity} ${product.name} to your downstream recruit`,
+									`[DEBUG TRADING] Trade quantity determined: ${tradeQuantity}`,
 								);
 
-								// Also update player's actual inventory in the game state
-								state = {
-									...state,
-									player: {
-										...state.player,
-										inventory: updatedPlayerInventory,
-									},
-								};
+								if (tradeQuantity > 0) {
+									// Update player's inventory
+									const playerNodeIndex = nodesAfterTrading.findIndex(
+										(n) => n.id === playerNode.id,
+									);
+
+									if (playerNodeIndex >= 0) {
+										const updatedPlayerInventory = {
+											...nodesAfterTrading[playerNodeIndex].inventory,
+										};
+										updatedPlayerInventory[randomProductId] = Math.max(
+											0,
+											(updatedPlayerInventory[randomProductId] || 0) -
+												tradeQuantity,
+										);
+
+										// Update target node's inventory
+										const updatedTargetInventory = { ...targetInventory };
+										updatedTargetInventory[randomProductId] =
+											(updatedTargetInventory[randomProductId] || 0) +
+											tradeQuantity;
+
+										// Update player node
+										nodesAfterTrading[playerNodeIndex] = {
+											...nodesAfterTrading[playerNodeIndex],
+											inventory: updatedPlayerInventory,
+											lastUpdated: Date.now(),
+										};
+
+										// Update target node
+										nodesAfterTrading[targetNodeIndex] = {
+											...nodesAfterTrading[targetNodeIndex],
+											inventory: updatedTargetInventory,
+											lastUpdated: Date.now(),
+										};
+
+										tradesMade = true;
+										console.log(
+											`%c[PLAYER TRADE] You transferred ${tradeQuantity} ${product.name} to your downstream recruit at level ${nodesAfterTrading[targetNodeIndex].level}`,
+											"background: #4CAF50; color: white; padding: 3px 6px; border-radius: 3px; font-weight: bold;",
+										);
+									} else {
+										console.log(
+											`[DEBUG TRADING] Player node not found in nodesAfterTrading array`,
+										);
+									}
+								} else {
+									console.log(
+										`[DEBUG TRADING] Trade quantity was 0, no trade occurred`,
+									);
+								}
+							} else {
+								console.log(
+									`[DEBUG TRADING] Target node has no available space for new inventory`,
+								);
 							}
+						} else {
+							console.log(
+								`[DEBUG TRADING] Target node not found in pyramid nodes`,
+							);
 						}
+					} else {
+						console.log(
+							`[DEBUG TRADING] Product not found for ID: ${randomProductId} or quantity is 0`,
+						);
 					}
 				}
 			}
+		} else if (playerOwnedNodesBelow.length === 0) {
+			console.log(`[DEBUG TRADING] No downstream nodes available for trading`);
+		} else {
+			console.log(
+				`[DEBUG TRADING] Trading skipped due to missing requirements`,
+			);
 		}
+	} else {
+		console.log(`[DEBUG TRADING] Player node not found or has no inventory`);
 	}
 
 	// After trading, process sales and commissions recursively
 	// This is the second phase where nodes try to sell products and pass commissions up
 	// We need to process from bottom to top to ensure commissions flow upward correctly
+
+	// Debug the state of all node inventories after trading for verification
+	console.log("[DEBUG NODE INVENTORIES AFTER TRADING]");
+	nodesAfterTrading.forEach((node) => {
+		if (node.ownedByPlayer) {
+			console.log(
+				`Node ${node.id} (owned by player, level ${node.level}): ${JSON.stringify(node.inventory || {})}`,
+			);
+		}
+	});
+
+	// IMPORTANT: Fix player inventory sync issues
+	// Check if player position node has lost its inventory but player stats still have it
+	const finalPlayerNodeBeforeFix = nodesAfterTrading.find(
+		(node) => node.isPlayerPosition,
+	);
+
+	if (
+		finalPlayerNodeBeforeFix &&
+		(!finalPlayerNodeBeforeFix.inventory ||
+			Object.keys(finalPlayerNodeBeforeFix.inventory).length === 0) &&
+		Object.keys(state.player.inventory).length > 0
+	) {
+		console.log(
+			"[FIXING PLAYER INVENTORY] Player node lost inventory but player stats have it",
+		);
+
+		// Find the index of the player node
+		const playerNodeIndex = nodesAfterTrading.findIndex(
+			(node) => node.isPlayerPosition,
+		);
+
+		if (playerNodeIndex >= 0) {
+			// Restore inventory from player stats
+			nodesAfterTrading[playerNodeIndex] = {
+				...nodesAfterTrading[playerNodeIndex],
+				inventory: { ...state.player.inventory },
+			};
+
+			console.log(
+				"[FIXED PLAYER INVENTORY] Restored inventory from player stats",
+			);
+		}
+	}
 
 	// Get all AI nodes sorted by level (bottom to top)
 	const sortedAINodes = nodesAfterTrading
@@ -1103,11 +1271,14 @@ const processDayCycle = (state: GameState): GameState => {
 			if (productQuantity > 0) {
 				// Chance to make a sale based on level and product
 				// Player-owned nodes get a bonus to sale chance
-				const levelBonus = (7 - node.level) * 0.02;
-				const ownershipBonus = node.ownedByPlayer ? 0.1 : 0; // 10% bonus for player-owned nodes
+				const levelBonus = (7 - node.level) * NODE_SALE_LEVEL_BONUS;
+				const ownershipBonus = node.ownedByPlayer ? PLAYER_OWNED_SALE_BONUS : 0; // 10% bonus for player-owned nodes
 				const saleChance = Math.min(
-					0.6, // Increased max chance
-					product.baseChance + levelBonus + ownershipBonus,
+					0.6, // Maximum cap on sale chance
+					product.baseChance +
+						NODE_RANDOM_SALE_CHANCE +
+						levelBonus +
+						ownershipBonus,
 				);
 
 				// Try to sell up to 2 items
@@ -1184,14 +1355,12 @@ const processDayCycle = (state: GameState): GameState => {
 
 					// Check if the upstream node is the player's position
 					if (nodesAfterTrading[upstreamNodeIndex].isPlayerPosition) {
-						// If player is the upstream node, add commission to player's money directly
-						state = {
-							...state,
-							player: {
-								...state.player,
-								money: state.player.money + commission,
-							},
-						};
+						// If player is the upstream node, record the commission to apply later
+						// We'll capture this in a variable and add it to player money at the end
+						const playerCommission = commission;
+
+						// Track commissions to add to player money at the end
+						playerCommissions = (playerCommissions || 0) + commission;
 
 						console.log(
 							`[COMMISSION] You received $${commission.toFixed(2)} commission from your downstream recruit's sales`,
@@ -1247,12 +1416,61 @@ const processDayCycle = (state: GameState): GameState => {
 		);
 	}
 
+	// Ensure player's inventory in player stats is in sync with the player's node inventory
+	const finalPlayerNode = updatedNodes.find((node) => node.isPlayerPosition);
+	console.log(
+		`[FINAL PLAYER NODE] Found: ${!!finalPlayerNode}, ID: ${finalPlayerNode?.id}`,
+	);
+
+	// Log all player nodes for diagnostics
+	console.log("[FINAL NODES] All nodes with player position:");
+	updatedNodes.forEach((node) => {
+		if (node.isPlayerPosition) {
+			console.log(
+				`- Node ID: ${node.id}, Level: ${node.level}, Has inventory: ${!!node.inventory}`,
+			);
+		}
+	});
+
+	// Get inventory from the player node OR from the player's stats if the node inventory is empty
+	// This is critical to prevent inventory loss
+	const finalPlayerInventory =
+		finalPlayerNode?.inventory &&
+		Object.keys(finalPlayerNode.inventory).length > 0
+			? finalPlayerNode.inventory
+			: state.player.inventory;
+
+	console.log(
+		"[PLAYER INVENTORY SYNC] Before sync:",
+		JSON.stringify(state.player.inventory),
+	);
+	console.log(
+		"[PLAYER INVENTORY SYNC] After sync:",
+		JSON.stringify(finalPlayerInventory),
+	);
+
+	// Never use an empty inventory object if player previously had items
+	const updatedPlayerInventory =
+		Object.keys(finalPlayerInventory).length > 0 ||
+		Object.keys(state.player.inventory).length === 0
+			? finalPlayerInventory
+			: state.player.inventory;
+
+	console.log(
+		"[PLAYER INVENTORY FINAL]:",
+		JSON.stringify(updatedPlayerInventory),
+	);
+
 	return {
 		...state,
 		pyramid: updatedPyramid,
 		player: {
 			...state.player,
 			recruits: newRecruits,
+			// Use the updated inventory or keep the original if it would be emptied
+			inventory: updatedPlayerInventory,
+			// Add any commissions earned to player's money
+			money: state.player.money + playerCommissions,
 		},
 	};
 };
@@ -1299,6 +1517,9 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 
 	// Process active marketing events
 	if (state.marketingEvents.length > 0) {
+		console.log(
+			`[DEBUG] Processing ${state.marketingEvents.length} active marketing events`,
+		);
 		const activeEvents = [...state.marketingEvents];
 		const completedEvents = [];
 		const updatedEvents = [];
@@ -1312,15 +1533,29 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 
 			// Check if event is completed
 			if (event.remainingHours <= 0) {
+				console.log(`[DEBUG] Marketing event "${event.name}" has completed!`);
 				completedEvents.push(event);
 			} else {
+				console.log(
+					`[DEBUG] Marketing event "${event.name}" has ${event.remainingHours} hours remaining`,
+				);
 				updatedEvents.push(event);
 			}
 		}
 
+		console.log(
+			`[DEBUG] Completed events: ${completedEvents.length}, Updated events: ${updatedEvents.length}`,
+		);
+
 		// Process completed events
 		if (completedEvents.length > 0) {
+			console.log(
+				`[DEBUG] Found ${completedEvents.length} completed marketing events to process`,
+			);
 			for (const event of completedEvents) {
+				console.log(
+					`[DEBUG] About to call processRecruitmentEvent for "${event.name}"`,
+				);
 				// For recruitment events, generate potential recruits
 				updatedState = processRecruitmentEvent(updatedState, event);
 			}
@@ -1357,8 +1592,11 @@ const processPlayerRandomSales = (state: GameState): GameState => {
 
 		if (productQuantity > 0) {
 			// Calculate sale chance based on charisma and product
-			const charismaBonus = state.player.charisma * 0.05; // 5% per charisma point
-			const saleChance = Math.min(0.95, product.baseChance + charismaBonus);
+			const charismaBonus = state.player.charisma * CHARISMA_SALE_BONUS; // 5% per charisma point
+			const saleChance = Math.min(
+				0.95,
+				product.baseChance + NODE_RANDOM_SALE_CHANCE + charismaBonus,
+			);
 
 			// Determine how many sales attempts based on inventory and charisma
 			// More charisma = more sales attempts per day
@@ -1415,11 +1653,81 @@ const processPlayerRandomSales = (state: GameState): GameState => {
 	};
 };
 
+// Helper function to generate marketing results
+const generateMarketingResults = (event: MarketingEvent): number => {
+	let successfulAttempts = 0;
+
+	// Calculate additional attempts from investment
+	let attemptBonus = 0;
+	if (event.investmentAmount && event.purpose === "recruitment") {
+		attemptBonus = Math.floor(
+			event.investmentAmount * INVESTMENT_ATTEMPTS_MULTIPLIER,
+		);
+	}
+
+	const totalAttempts = event.maxAttempts + attemptBonus;
+
+	// Calculate investment-boosted success chance
+	let adjustedChance = event.successChance;
+	if (event.investmentAmount) {
+		const investmentBonus = Math.min(
+			0.15,
+			event.investmentAmount * INVESTMENT_SUCCESS_MULTIPLIER,
+		);
+		adjustedChance = Math.min(0.95, adjustedChance + investmentBonus);
+	}
+
+	console.log(
+		`[DEBUG] Running ${totalAttempts} attempts with ${Math.round(adjustedChance * 100)}% success chance each`,
+	);
+
+	// Try the maximum number of attempts
+	for (let i = 0; i < totalAttempts; i++) {
+		const roll = Math.random();
+		const isSuccess = roll < adjustedChance;
+		console.log(
+			`[DEBUG] Attempt ${i + 1}: Roll ${Math.round(roll * 100)}% vs ${Math.round(adjustedChance * 100)}% chance - ${isSuccess ? "SUCCESS" : "FAILURE"}`,
+		);
+
+		if (isSuccess) {
+			successfulAttempts++;
+		}
+	}
+
+	// Special case for workshops: 10% chance for extra recruit for each success
+	if (event.type === "workshop") {
+		console.log(
+			`[DEBUG] Workshop bonus: Checking for extra recruits on ${successfulAttempts} successes`,
+		);
+		for (let i = 0; i < successfulAttempts; i++) {
+			const bonusRoll = Math.random();
+			const bonusSuccess = bonusRoll < WORKSHOP_EXTRA_RECRUIT_CHANCE;
+			console.log(
+				`[DEBUG] Workshop bonus attempt ${i + 1}: Roll ${Math.round(bonusRoll * 100)}% vs ${Math.round(WORKSHOP_EXTRA_RECRUIT_CHANCE * 100)}% chance - ${bonusSuccess ? "SUCCESS" : "FAILURE"}`,
+			);
+
+			if (bonusSuccess) {
+				successfulAttempts++;
+				console.log(`Workshop bonus: Extra recruit awarded!`);
+			}
+		}
+	}
+
+	console.log(
+		`Marketing event results: ${successfulAttempts} successes from ${totalAttempts} attempts (${Math.round(adjustedChance * 100)}% chance)`,
+	);
+
+	return successfulAttempts;
+};
+
 // Helper function to process recruitment marketing events
 const processRecruitmentEvent = (
 	state: GameState,
 	event: MarketingEvent,
 ): GameState => {
+	console.log(
+		`[DEBUG] **** PROCESS RECRUITMENT EVENT FUNCTION CALLED **** for "${event.name}"`,
+	);
 	// Generate results for completed recruitment marketing event
 	const successAttempts = generateMarketingResults(event);
 
@@ -1451,87 +1759,61 @@ const processRecruitmentEvent = (
 		(node) => node.ownedByPlayer && !node.isPlayerPosition,
 	).length;
 
-	// Only process recruitment if we have fewer than 2 recruits
-	const maxRecruits = 2;
-	const remainingSlots = Math.max(0, maxRecruits - currentOwnedNodes);
-
-	if (remainingSlots <= 0) {
-		console.log(
-			`Already at maximum ${maxRecruits} recruits, no new recruits will be added`,
-		);
-		return state;
-	}
-
-	// Process only as many recruits as we have slots for
-	const attemptsToProcess = Math.min(successAttempts, remainingSlots);
 	console.log(
-		`Processing ${attemptsToProcess} out of ${successAttempts} successful recruits`,
+		`Current owned nodes: ${currentOwnedNodes}, Processing all ${successAttempts} successful recruits`,
 	);
+
+	// Process all successful recruitment attempts - no more maximum limit
+	const attemptsToProcess = successAttempts;
+	console.log(`Processing ${attemptsToProcess} successful recruits from event`);
 
 	// Process each successful recruit attempt
 	for (let i = 0; i < attemptsToProcess; i++) {
-		// Calculate recruitment chance based on player stats and event
-		const baseChance = 0.12 + state.player.charisma * 0.02;
-		const recruitingBonus = state.player.recruitingPower * 0.06;
-		const reputationBonus = state.player.reputation * 0.04;
+		// We already have successful attempts from the marketing event, so we'll
+		// directly add them as recruits without an additional random check
+		console.log(`Adding recruit attempt ${i + 1} - SUCCESS`);
 
-		// Investment provides additional bonus
-		const investmentBonus = event.investmentAmount
-			? Math.min(0.2, event.investmentAmount * INVESTMENT_SUCCESS_MULTIPLIER)
-			: 0;
-
-		// Calculate final chance, capped at 65%
-		const recruitChance = Math.min(
-			0.65,
-			baseChance + recruitingBonus + reputationBonus + investmentBonus,
+		// Add new node to the pyramid below the player
+		const result = addNodeToPyramid(
+			updatedPyramid,
+			playerNode.id,
+			playerNode.level + 1,
 		);
 
-		// Roll for recruitment success
-		const roll = Math.random();
-		const isSuccessful = roll < recruitChance;
+		updatedPyramid = result.pyramid;
+		updatedNodes = updatedPyramid.nodes;
 
-		console.log(
-			`Marketing recruitment attempt ${i + 1}: Chance ${Math.round(recruitChance * 100)}%, Roll ${Math.round(roll * 100)}% - ${isSuccessful ? "SUCCESS" : "FAILURE"}`,
+		// Mark the new node as owned by player
+		const newNodeIndex = updatedNodes.findIndex(
+			(node) => node.id === result.newNodeId,
 		);
 
-		if (isSuccessful) {
-			// Add new node to the pyramid below the player
-			const result = addNodeToPyramid(
-				updatedPyramid,
-				playerNode.id,
-				playerNode.level + 1,
+		if (newNodeIndex >= 0) {
+			updatedNodes[newNodeIndex] = {
+				...updatedNodes[newNodeIndex],
+				ownedByPlayer: true,
+				lastUpdated: Date.now(),
+				// Initialize inventory
+				inventory: {},
+				maxInventory: DEFAULT_MAX_INVENTORY,
+			};
+
+			// Mark that the pyramid has changed and increment recruit count
+			pyramidChanged = true;
+			newRecruits++;
+
+			console.log(`Recruits count increased to ${newRecruits}`);
+			console.log(
+				`Marketing event success: Added new recruit node at level ${playerNode.level + 1}, ID: ${result.newNodeId}`,
 			);
-
-			updatedPyramid = result.pyramid;
-			updatedNodes = updatedPyramid.nodes;
-
-			// Mark the new node as owned by player
-			const newNodeIndex = updatedNodes.findIndex(
-				(node) => node.id === result.newNodeId,
-			);
-
-			if (newNodeIndex >= 0) {
-				updatedNodes[newNodeIndex] = {
-					...updatedNodes[newNodeIndex],
-					ownedByPlayer: true,
-					lastUpdated: Date.now(),
-					// Initialize inventory
-					inventory: {},
-					maxInventory: DEFAULT_MAX_INVENTORY,
-				};
-
-				// Instead of propagating ownership, just mark this new node
-				// This avoids exceeding our 2-recruit limit
-				pyramidChanged = true;
-				newRecruits++;
-
-				console.log(`Recruits count increased to ${newRecruits}`);
-				console.log(
-					`Marketing event success: Added new recruit node at level ${playerNode.level + 1}, ID: ${result.newNodeId}`,
-				);
-			}
 		}
 	}
+
+	// Update the nodes in the pyramid
+	updatedPyramid = {
+		...updatedPyramid,
+		nodes: updatedNodes,
+	};
 
 	// Update pyramid version if changed
 	if (pyramidChanged) {
@@ -1547,54 +1829,6 @@ const processRecruitmentEvent = (
 			recruits: newRecruits,
 		},
 	};
-};
-
-// Helper function to generate marketing results
-const generateMarketingResults = (event: MarketingEvent): number => {
-	let successfulAttempts = 0;
-
-	// Calculate additional attempts from investment
-	let attemptBonus = 0;
-	if (event.investmentAmount && event.purpose === "recruitment") {
-		attemptBonus = Math.floor(
-			event.investmentAmount * INVESTMENT_ATTEMPTS_MULTIPLIER,
-		);
-	}
-
-	const totalAttempts = event.maxAttempts + attemptBonus;
-
-	// Calculate investment-boosted success chance
-	let adjustedChance = event.successChance;
-	if (event.investmentAmount) {
-		const investmentBonus = Math.min(
-			0.15,
-			event.investmentAmount * INVESTMENT_SUCCESS_MULTIPLIER,
-		);
-		adjustedChance = Math.min(0.95, adjustedChance + investmentBonus);
-	}
-
-	// Try the maximum number of attempts
-	for (let i = 0; i < totalAttempts; i++) {
-		if (Math.random() < adjustedChance) {
-			successfulAttempts++;
-		}
-	}
-
-	// Special case for workshops: 10% chance for extra recruit for each success
-	if (event.type === "workshop") {
-		for (let i = 0; i < successfulAttempts; i++) {
-			if (Math.random() < WORKSHOP_EXTRA_RECRUIT_CHANCE) {
-				successfulAttempts++;
-				console.log(`Workshop bonus: Extra recruit awarded!`);
-			}
-		}
-	}
-
-	console.log(
-		`Marketing event results: ${successfulAttempts} successes from ${totalAttempts} attempts (${Math.round(adjustedChance * 100)}% chance)`,
-	);
-
-	return successfulAttempts;
 };
 
 // Game state reducer
@@ -1960,6 +2194,35 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			};
 		}
 
+		case "UPGRADE_INVENTORY": {
+			// Cost increases with each upgrade
+			const currentCapacity = state.player.maxInventory;
+			const cost =
+				INVENTORY_UPGRADE_COST +
+				(currentCapacity - DEFAULT_MAX_INVENTORY) * 500;
+
+			// Check if player has enough money
+			if (state.player.money < cost) {
+				console.log(`Not enough money to upgrade inventory. Cost: $${cost}`);
+				return state;
+			}
+
+			console.log(
+				`[UPGRADE] Increased inventory capacity for $${cost}, +5 capacity`,
+			);
+
+			// Apply the purchase (no energy cost for this action)
+			return {
+				...state,
+				player: {
+					...state.player,
+					maxInventory: currentCapacity + 5, // Increase capacity by 5
+					money: state.player.money - cost,
+				},
+				turns: state.turns + 1,
+			};
+		}
+
 		case "REST": {
 			const { hours } = action;
 
@@ -2017,6 +2280,24 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			if (state.player.energy < PRODUCT_BUY_ENERGY_COST) {
 				console.log(
 					`Not enough energy to buy products. Required: ${PRODUCT_BUY_ENERGY_COST}`,
+				);
+				return state;
+			}
+
+			// Check if player has enough inventory space
+			const currentInventory = state.player.inventory;
+			const totalItems = Object.values(currentInventory).reduce(
+				(sum, qty) => sum + qty,
+				0,
+			);
+			const maxInventory = state.player.maxInventory || DEFAULT_MAX_INVENTORY;
+
+			// Calculate how much space we have available
+			const availableSpace = maxInventory - totalItems;
+
+			if (availableSpace < quantity) {
+				console.log(
+					`Not enough inventory space. Available: ${availableSpace}, Trying to buy: ${quantity}`,
 				);
 				return state;
 			}

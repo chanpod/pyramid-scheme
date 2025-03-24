@@ -10,6 +10,7 @@ import { getNodesBelow } from "../utils/pyramidGenerator";
 // Constants to match the ones in useGameState.ts
 const ENERGY_COST = 800;
 const MAX_ENERGY = 20;
+const INVENTORY_UPGRADE_COST = 1000;
 
 interface PlayerStatsProps {
 	stats: PlayerStatsType;
@@ -250,6 +251,47 @@ const RestIcon = styled.span`
 	font-size: 12px;
 `;
 
+const InventorySummary = styled.div`
+  margin-top: 15px;
+  background-color: #f5f5f5;
+  border-radius: 6px;
+  padding: 12px;
+`;
+
+const InventoryTitle = styled.div`
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+`;
+
+const InventoryList = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  font-size: 13px;
+`;
+
+const InventoryItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  background-color: #fff;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+`;
+
+const ProductName = styled.span`
+  color: #555;
+`;
+
+const ProductCount = styled.span`
+  font-weight: bold;
+  color: #388e3c;
+`;
+
 const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 	stats,
 	lastDailyEnergyBonus,
@@ -263,12 +305,15 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 	const charismaCost = stats.charisma * 200;
 	const recruitingCost = stats.recruitingPower * 250;
 	const energyCost = ENERGY_COST;
+	const inventoryCost =
+		INVENTORY_UPGRADE_COST + (stats.maxInventory - 10) * 500;
 	const isMaxEnergy = stats.energy >= MAX_ENERGY;
 
 	// Check if player can afford upgrades
 	const canAffordCharisma = stats.money >= charismaCost;
 	const canAffordRecruiting = stats.money >= recruitingCost;
 	const canAffordEnergy = stats.money >= energyCost && !isMaxEnergy;
+	const canAffordInventory = stats.money >= inventoryCost;
 
 	// Calculate potential recruits (nodes below the player that are not owned)
 	const potentialRecruits = playerNodeId
@@ -312,6 +357,14 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 			}
 		}
 	}, [lastDailyEnergyBonus]);
+
+	// Get inventory items that player has
+	const inventoryItems = Object.entries(stats.inventory)
+		.filter(([_, count]) => count > 0)
+		.map(([productId, count]) => ({
+			id: productId,
+			count,
+		}));
 
 	return (
 		<StatsContainer>
@@ -395,6 +448,45 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 
 				<StatItem>
 					<StatLabel>
+						<div
+							style={{ display: "flex", alignItems: "center", width: "100%" }}
+						>
+							<div style={{ display: "flex", alignItems: "center" }}>
+								<StatIcon>📦</StatIcon>Inventory
+							</div>
+							<div style={{ marginLeft: "auto" }}>
+								<Tooltip data-tooltip={`Upgrade Inventory: $${inventoryCost}`}>
+									<UpgradeButton
+										disabled={stats.isResting || !canAffordInventory}
+										onClick={() => dispatch({ type: "UPGRADE_INVENTORY" })}
+									>
+										+
+									</UpgradeButton>
+								</Tooltip>
+							</div>
+						</div>
+					</StatLabel>
+					<StatValue>
+						<span>
+							{Object.values(stats.inventory).reduce(
+								(sum, qty) => sum + qty,
+								0,
+							)}{" "}
+							/ {stats.maxInventory}
+						</span>
+						{!canAffordInventory && <UpgradeCost>${inventoryCost}</UpgradeCost>}
+					</StatValue>
+					<StatBar
+						value={Object.values(stats.inventory).reduce(
+							(sum, qty) => sum + qty,
+							0,
+						)}
+						max={stats.maxInventory}
+					/>
+				</StatItem>
+
+				<StatItem>
+					<StatLabel>
 						<div>
 							<StatIcon>✨</StatIcon>Charisma
 						</div>
@@ -444,6 +536,25 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 					<StatValue>{stats.reputation}</StatValue>
 				</StatItem>
 			</StatGrid>
+
+			{/* Add inventory summary if player has items */}
+			{inventoryItems.length > 0 && (
+				<InventorySummary>
+					<InventoryTitle>
+						<StatIcon>🧰</StatIcon> Inventory Items
+					</InventoryTitle>
+					<InventoryList>
+						{inventoryItems.map((item) => (
+							<InventoryItem key={item.id}>
+								<ProductName>
+									{item.id.charAt(0).toUpperCase() + item.id.slice(1)}
+								</ProductName>
+								<ProductCount>{item.count}</ProductCount>
+							</InventoryItem>
+						))}
+					</InventoryList>
+				</InventorySummary>
+			)}
 		</StatsContainer>
 	);
 };

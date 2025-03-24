@@ -65,6 +65,7 @@ export interface PlayerStats {
 	restUntil: number;
 	recoveryPercentage?: number; // Used to store recovery rate during resting
 	inventory: { [productId: string]: number }; // Product inventory counts
+	maxInventory: number; // Maximum inventory capacity
 	totalSalesRandom: number; // Total lifetime sales to random people
 	totalSalesDownstream: number; // Total lifetime sales to downstreams
 }
@@ -91,6 +92,7 @@ export type GameAction =
 	| { type: "UPGRADE_CHARISMA" }
 	| { type: "UPGRADE_RECRUITING" }
 	| { type: "UPGRADE_ENERGY" }
+	| { type: "UPGRADE_INVENTORY" }
 	| { type: "REST"; hours: number }
 	| { type: "ADVANCE_TIME"; hours: number }
 	| { type: "RESET_GAME" }

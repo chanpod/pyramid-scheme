@@ -638,6 +638,11 @@ const BenefitIcon = styled.span`
 	margin-right: 5px;
 `;
 
+const InfoIcon = styled.span`
+	margin-right: 8px;
+	font-size: 16px;
+`;
+
 const ActionPanel: React.FC<ActionPanelProps> = ({
 	dispatch,
 	playerStats,
@@ -1168,9 +1173,18 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 
 			<InventorySection>
 				<SectionTitle>
-					<SectionTitleIcon>🛒</SectionTitleIcon> Product Inventory
+					<SectionTitleIcon>📦</SectionTitleIcon>Your Inventory
+					<span style={{ fontSize: "14px", marginLeft: "10px", color: "#666" }}>
+						(
+						{Object.values(playerStats.inventory).reduce(
+							(sum, qty) => sum + qty,
+							0,
+						)}
+						/{playerStats.maxInventory})
+					</span>
 				</SectionTitle>
 
+				{/* Product list */}
 				{products.map((product) => {
 					const quantity = playerStats.inventory[product.id] || 0;
 					const isSelected = selectedProduct === product.id;
@@ -1233,13 +1247,29 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 											disabled={
 												playerStats.money <
 													product.baseCost * productQuantity ||
-												playerStats.energy < PRODUCT_BUY_ENERGY_COST
+												playerStats.energy < PRODUCT_BUY_ENERGY_COST ||
+												Object.values(playerStats.inventory).reduce(
+													(sum, qty) => sum + qty,
+													0,
+												) +
+													productQuantity >
+													playerStats.maxInventory
 											}
 										>
 											<ActionIcon>🛒</ActionIcon> Buy ({productQuantity})
 											{playerStats.energy < PRODUCT_BUY_ENERGY_COST && (
 												<StatusTag isPositive={false}>
 													Need {PRODUCT_BUY_ENERGY_COST} Energy
+												</StatusTag>
+											)}
+											{Object.values(playerStats.inventory).reduce(
+												(sum, qty) => sum + qty,
+												0,
+											) +
+												productQuantity >
+												playerStats.maxInventory && (
+												<StatusTag isPositive={false}>
+													Not enough space
 												</StatusTag>
 											)}
 										</ActionButton>
@@ -1282,8 +1312,9 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 							borderRadius: "3px",
 						}}
 					>
-						<strong>Note:</strong> Your inventory is automatically used to sell
-						to random people at the end of each day based on your charisma.
+						<strong>Note:</strong> Your inventory is limited to{" "}
+						{playerStats.maxInventory} total items. Upgrade your inventory
+						capacity in the stats panel to carry more products.
 					</p>
 				</div>
 			</InventorySection>

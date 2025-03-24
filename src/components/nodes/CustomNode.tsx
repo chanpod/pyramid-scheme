@@ -6,7 +6,7 @@ import type { PyramidNode } from "../../types";
 
 type CustomNodeData = PyramidNode & {
 	isSelected: boolean;
-	onClick: () => void;
+	onClick: (event: React.MouseEvent) => void;
 };
 
 // Network colors for different AI competitors
@@ -272,7 +272,7 @@ export const CustomNode = memo(({ data }: NodeProps<CustomNodeData>) => {
 		<NodeContainer
 			isPlayer={isPlayer}
 			isSelected={data.isSelected}
-			onClick={data.onClick}
+			onClick={(e) => data.onClick(e)}
 			title={`${networkName} (Level ${data.level})
 Money: $${data.money.toLocaleString()}
 Status: ${isPlayer ? "You" : data.ownedByPlayer ? "Your Network" : "AI Controlled"}`}
