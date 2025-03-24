@@ -821,6 +821,18 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 		}
 	};
 
+	// Calculate and format remaining rest time
+	const formatRemainingRestTime = (
+		restUntil: number,
+		currentDay: number,
+		currentHour: number,
+	) => {
+		const currentTotalHours = currentDay * 24 + currentHour;
+		const remainingHours = Math.max(0, restUntil - currentTotalHours);
+
+		return remainingHours > 0 ? `${remainingHours} hours` : "finishing soon";
+	};
+
 	return (
 		<PanelContainer>
 			<PanelTitle>
@@ -835,6 +847,10 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 			{playerStats.isResting && (
 				<RestingMessage>
 					<span>😴</span> You are currently resting and cannot perform actions.
+					<div style={{ marginTop: "8px", fontSize: "14px" }}>
+						Time remaining:{" "}
+						{formatRemainingRestTime(playerStats.restUntil, gameDay, gameHour)}
+					</div>
 				</RestingMessage>
 			)}
 

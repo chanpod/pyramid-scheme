@@ -63,6 +63,7 @@ export interface PlayerStats {
 	reputation: number;
 	isResting: boolean;
 	restUntil: number;
+	recoveryPercentage?: number; // Used to store recovery rate during resting
 	inventory: { [productId: string]: number }; // Product inventory counts
 	totalSalesRandom: number; // Total lifetime sales to random people
 	totalSalesDownstream: number; // Total lifetime sales to downstreams
@@ -93,6 +94,7 @@ export type GameAction =
 	| { type: "REST"; hours: number }
 	| { type: "ADVANCE_TIME"; hours: number }
 	| { type: "RESET_GAME" }
+	| { type: "SET_GAME_OVER"; isWinner: boolean }
 	| {
 			type: "NETWORK_MARKETING";
 			intensity: "light" | "medium" | "aggressive";

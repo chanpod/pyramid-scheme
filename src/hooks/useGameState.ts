@@ -1978,38 +1978,96 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			// Calculate a random energy recovery percentage between 60-100%
 			const recoveryPercentage = 0.6 + Math.random() * 0.4;
 
-			// Calculate energy gain based on rest duration and recovery percentage
-			// Longer rest = more energy, with some randomness
-			const energyGain = Math.min(
-				MAX_ENERGY - state.player.energy,
-				Math.ceil(hours * recoveryPercentage * 1.5), // Scaled to be more generous than previous system
-			);
-
+			// Store the recovery percentage and energy gain for later use when rest is completed
 			console.log(
-				`Resting for ${hours} hours. Current energy: ${state.player.energy}, Gain: ${energyGain}, Recovery: ${Math.round(recoveryPercentage * 100)}%`,
+				`Starting rest for ${hours} hours. Current energy: ${state.player.energy}, 
+				Recovery rate: ${Math.round(recoveryPercentage * 100)}%`,
 			);
 
-			// Advance time while resting
-			let updatedState = advanceGameTime(state, hours);
-
-			// Update player energy and resting status
+			// Set resting state (but don't advance time yet)
 			return {
-				...updatedState,
+				...state,
 				player: {
-					...updatedState.player,
-					energy: Math.min(MAX_ENERGY, state.player.energy + energyGain),
-					isResting: false, // Player is done resting once the time has been advanced
+					...state.player,
+					isResting: true,
+					restUntil: restUntil,
+					// Store the recovery percentage for later use
+					recoveryPercentage: recoveryPercentage,
 				},
 				turns: state.turns + 1,
 			};
 		}
 
 		case "ADVANCE_TIME": {
-			return advanceGameTime(state, action.hours);
+			let updatedState = advanceGameTime(state, action.hours);
+
+			// Check if the player is resting and if rest should be completed
+			if (state.player.isResting) {
+				const currentTotalHours =
+					state.gameDay * HOURS_PER_DAY + state.gameHour + action.hours;
+
+				// If current time has reached or passed the restUntil time
+				if (currentTotalHours >= state.player.restUntil) {
+					// Calculate how many hours the player actually rested
+					const hoursRested =
+						state.player.restUntil -
+						(state.gameDay * HOURS_PER_DAY + state.gameHour);
+
+					// Calculate energy gain based on rest duration and stored recovery percentage
+					const recoveryPercentage = state.player.recoveryPercentage || 0.8; // Default if not stored
+					const energyGain = Math.min(
+						MAX_ENERGY - state.player.energy,
+						Math.ceil(hoursRested * recoveryPercentage * 1.5), // Scaled to be more generous than previous system
+					);
+
+					console.log(
+						`Rest completed after ${hoursRested} hours. Energy gain: ${energyGain}, 
+						Recovery: ${Math.round(recoveryPercentage * 100)}%`,
+					);
+
+					// Update player energy and end resting state
+					updatedState = {
+						...updatedState,
+						player: {
+							...updatedState.player,
+							energy: Math.min(MAX_ENERGY, state.player.energy + energyGain),
+							isResting: false,
+							restUntil: 0,
+							recoveryPercentage: undefined,
+						},
+					};
+				}
+			} else {
+				// Check for game over condition if not resting
+				// Only trigger game over if they're completely out of options
+				if (
+					updatedState.player.energy <= 0 &&
+					updatedState.player.money < ENERGY_COST &&
+					!updatedState.gameOver
+				) {
+					// Set game over but not a winner
+					updatedState = {
+						...updatedState,
+						gameOver: true,
+						isWinner: false,
+					};
+					console.log("GAME OVER after time advance: Out of energy and money");
+				}
+			}
+
+			return updatedState;
 		}
 
 		case "RESET_GAME": {
 			return createInitialGameState();
+		}
+
+		case "SET_GAME_OVER": {
+			return {
+				...state,
+				gameOver: true,
+				isWinner: action.isWinner,
+			};
 		}
 
 		default:
@@ -2044,16 +2102,19 @@ export const useGameState = () => {
 		) {
 			// If player can't make any moves and isn't resting, game over
 			if (!gameState.player.isResting) {
-				const updatedGameState = {
-					...gameState,
-					gameOver: true,
-					isWinner: false,
-				};
-				// We can't use dispatch here as it would cause an infinite loop
-				// This is just a check to inform the UI
+				// Don't directly modify the gameState - use dispatch instead
+				// Just set game over flag without resetting game
+				dispatch({ type: "SET_GAME_OVER", isWinner: false });
+				console.log("GAME OVER: Out of energy and money");
 			}
 		}
-	}, [gameState]);
+	}, [
+		gameState.player.energy,
+		gameState.player.money,
+		gameState.player.isResting,
+		gameState.gameOver,
+		dispatch,
+	]);
 
 	return { gameState, dispatch };
 };
