@@ -91,6 +91,16 @@ const propagateOwnership = (
 	const updatedNodes = [...pyramid.nodes];
 	const processed = new Set<string>();
 
+	// For player propagation, we need to track how many player-owned nodes we've marked
+	// to respect the limit of 2 recruits
+	let playerOwnedCount = 0;
+	if (isPlayer) {
+		// Count existing player-owned nodes (excluding player position)
+		playerOwnedCount = updatedNodes.filter(
+			(node) => node.ownedByPlayer && !node.isPlayerPosition,
+		).length;
+	}
+
 	// Recursive function to traverse network downward and update ownership
 	const processNode = (nodeId: string) => {
 		if (processed.has(nodeId)) return; // Prevent cycles
@@ -107,15 +117,32 @@ const propagateOwnership = (
 			if (childNodeIndex >= 0) {
 				// Update ownership
 				if (isPlayer) {
-					// For player network, mark as owned by player
-					updatedNodes[childNodeIndex] = {
-						...updatedNodes[childNodeIndex],
-						ownedByPlayer: true,
-						aiControlled: false, // Remove from AI network if it was there
-						lastUpdated: Date.now(),
-					};
+					// For player network, only mark up to 2 nodes as owned
+					if (
+						playerOwnedCount < 2 ||
+						updatedNodes[childNodeIndex].ownedByPlayer
+					) {
+						// Only increment count if this is a new player-owned node
+						if (!updatedNodes[childNodeIndex].ownedByPlayer) {
+							playerOwnedCount++;
+						}
+
+						// Mark as owned by player
+						updatedNodes[childNodeIndex] = {
+							...updatedNodes[childNodeIndex],
+							ownedByPlayer: true,
+							aiControlled: false, // Remove from AI network if it was there
+							lastUpdated: Date.now(),
+						};
+
+						// Only continue propagation if we haven't reached the limit
+						if (playerOwnedCount < 2) {
+							// Process children of this node recursively
+							processNode(link.source);
+						}
+					}
 				} else {
-					// For AI network (not needed for current fix, but included for future use)
+					// For AI network (not modified)
 					if (!updatedNodes[childNodeIndex].ownedByPlayer) {
 						// Don't take over player nodes
 						updatedNodes[childNodeIndex] = {
@@ -124,11 +151,11 @@ const propagateOwnership = (
 							ownedByPlayer: false,
 							lastUpdated: Date.now(),
 						};
+
+						// Process children of this node recursively
+						processNode(link.source);
 					}
 				}
-
-				// Process children of this node recursively
-				processNode(link.source);
 			}
 		}
 	};
@@ -189,6 +216,57 @@ const createInitialGameState = (): GameState => {
 		console.log(
 			`Player randomly placed at node ${playerNode.id} on level ${playerNode.level} (position ${playerNodeIndex + 1} of ${level5Nodes.length})`,
 		);
+
+		// LIMIT DOWNSTREAM NODES: Find all nodes that are directly below the player
+		const nodesBelow = pyramid.nodes.filter(
+			(node) =>
+				node.level === playerNode.level + 1 &&
+				pyramid.links.some(
+					(link) => link.source === node.id && link.target === playerNode.id,
+				),
+		);
+
+		console.log(`Found ${nodesBelow.length} nodes directly below player`);
+
+		// If there are more than 2 nodes below, keep only 2 and remove the rest
+		if (nodesBelow.length > 2) {
+			// Sort nodes by ID to ensure deterministic selection
+			const sortedNodesBelow = [...nodesBelow].sort((a, b) =>
+				a.id.localeCompare(b.id),
+			);
+
+			// Keep the first 2 nodes, remove the rest
+			const nodesToKeep = sortedNodesBelow.slice(0, 2);
+			const nodesToRemove = sortedNodesBelow.slice(2);
+
+			console.log(
+				`Keeping ${nodesToKeep.length} nodes, removing ${nodesToRemove.length} nodes`,
+			);
+
+			// Remove the excess nodes from the pyramid
+			for (const nodeToRemove of nodesToRemove) {
+				// Remove the node
+				const nodeIndex = pyramid.nodes.findIndex(
+					(n) => n.id === nodeToRemove.id,
+				);
+				if (nodeIndex >= 0) {
+					pyramid.nodes.splice(nodeIndex, 1);
+				}
+
+				// Remove all links connected to this node
+				pyramid.links = pyramid.links.filter(
+					(link) =>
+						link.source !== nodeToRemove.id && link.target !== nodeToRemove.id,
+				);
+			}
+
+			console.log(
+				`Pyramid now has ${pyramid.nodes.length} nodes and ${pyramid.links.length} links`,
+			);
+		}
+
+		// If there are fewer than 2 nodes below, the standard ensureRecruitableNodesBelow
+		// logic will add them later
 	}
 
 	// Step 2: Create AI competitors (5-7 competitors)
@@ -220,6 +298,31 @@ const createInitialGameState = (): GameState => {
 		aiNode.aiControlled = true;
 		aiNode.name = aiName;
 		aiNode.aiStrategy = aiStrategy;
+		aiNode.maxInventory = DEFAULT_MAX_INVENTORY;
+
+		// Initialize AI inventory with a few products
+		aiNode.inventory = {};
+
+		// Higher-level AI competitors start with more inventory and money
+		const startingMoney =
+			800 + Math.floor(Math.random() * 400) - aiNode.level * 50;
+		aiNode.money = Math.max(200, startingMoney); // Ensure at least 200 starting money
+
+		// Give some starting inventory to the AI (preferring different products based on strategy)
+		productDefinitions.forEach((product, index) => {
+			// Aggressive AI starts with more expensive products
+			// Steady AI starts with more reliable products
+			const shouldStock =
+				aiStrategy === "aggressive"
+					? product.basePrice > 30 // Aggressive AI prefers more expensive products
+					: product.baseChance > 0.15; // Steady AI prefers more reliable products
+
+			if (shouldStock || Math.random() < 0.4) {
+				// 40% chance to stock any product
+				const quantity = 1 + Math.floor(Math.random() * 3); // 1-3 of each product
+				aiNode.inventory[product.id] = quantity;
+			}
+		});
 
 		aiCompetitors.push({
 			id: aiNode.id,
@@ -255,6 +358,8 @@ const createInitialGameState = (): GameState => {
 						// This node belongs to player's network but ONLY if it's below the player's position
 						if (isNodeBelow(pyramid, node.id, playerNode.id)) {
 							node.ownedByPlayer = true;
+							node.inventory = {};
+							node.maxInventory = DEFAULT_MAX_INVENTORY;
 							assignedSomeNodes = true;
 							break;
 						}
@@ -265,6 +370,11 @@ const createInitialGameState = (): GameState => {
 						node.name = owningNode.name
 							? `${owningNode.name}'s Recruit`
 							: "AI Recruit";
+						// Initialize with empty inventory
+						node.inventory = {};
+						node.maxInventory = DEFAULT_MAX_INVENTORY;
+						// Give some starting money
+						node.money = 100 + Math.floor(Math.random() * 200);
 						assignedSomeNodes = true;
 						break;
 					}
@@ -286,8 +396,10 @@ const createInitialGameState = (): GameState => {
 			const isBelow = isNodeBelow(pyramid, node.id, playerNode.id);
 
 			// Only assign to player if it's below the player's position
-			if (isBelow && Math.random() < 0.5) {
+			if (isBelow) {
 				node.ownedByPlayer = true;
+				node.maxInventory = DEFAULT_MAX_INVENTORY;
+				node.inventory = {};
 			} else {
 				node.aiControlled = true;
 				// Pick a random AI competitor to own this node
@@ -295,6 +407,11 @@ const createInitialGameState = (): GameState => {
 					aiCompetitors[Math.floor(Math.random() * aiCompetitors.length)];
 				node.aiStrategy = randomAI.strategy;
 				node.name = `${randomAI.name}'s Recruit`;
+				// Initialize with empty inventory
+				node.inventory = {};
+				node.maxInventory = DEFAULT_MAX_INVENTORY;
+				// Give some starting money
+				node.money = 50 + Math.floor(Math.random() * 150);
 			}
 		}
 	}
@@ -339,58 +456,47 @@ const createInitialGameState = (): GameState => {
 		(node) => node.ownedByPlayer && !node.isPlayerPosition,
 	);
 
-	// STRICT ENFORCEMENT: Limit initial recruits to maximum of 2
-	// If we have more than 2 owned nodes, we need to reassign some to AI competitors
-	if (playerOwnedNodes.length > 2) {
+	// Instead of just unmarking excess nodes, we'll remove them completely
+	let initialRecruits = playerOwnedNodes.length;
+
+	// If we have more than 2 owned nodes, we need to remove the excess nodes
+	if (initialRecruits > 2) {
 		console.log(
-			`Strictly limiting player's initial recruits from ${playerOwnedNodes.length} to 2`,
+			`Limiting player's owned nodes from ${initialRecruits} to 2 by removing excess nodes`,
 		);
 
-		// Keep track of nodes to unassign from player's network
-		const nodesToRemove = [...playerOwnedNodes];
-		// Shuffle the array to randomize which nodes we keep
-		nodesToRemove.sort(() => Math.random() - 0.5);
+		// Sort owned nodes by level (ascending) so we keep nodes closest to player
+		const sortedOwnedNodes = [...playerOwnedNodes].sort(
+			(a, b) => a.level - b.level,
+		);
 
-		// Keep only 2 nodes in the player's network
-		const nodesToKeep = nodesToRemove.splice(0, 2);
+		// Keep only the first 2 nodes, remove the rest
+		const nodesToKeep = sortedOwnedNodes.slice(0, 2);
+		const nodesToRemove = sortedOwnedNodes.slice(2);
 
-		// Reset all player-owned nodes
-		for (const node of pyramid.nodes) {
-			if (node.ownedByPlayer && !node.isPlayerPosition) {
-				// Reset to unowned
-				node.ownedByPlayer = false;
-			}
-		}
-
-		// Mark only the kept nodes as player-owned
-		for (const nodeToKeep of nodesToKeep) {
-			const nodeIndex = pyramid.nodes.findIndex((n) => n.id === nodeToKeep.id);
-			if (nodeIndex >= 0) {
-				pyramid.nodes[nodeIndex].ownedByPlayer = true;
-			}
-		}
-
-		// Reassign the other nodes to AIs
-		for (const nodeToReassign of nodesToRemove) {
+		// Remove the excess nodes from the pyramid
+		for (const nodeToRemove of nodesToRemove) {
+			// Remove the node
 			const nodeIndex = pyramid.nodes.findIndex(
-				(n) => n.id === nodeToReassign.id,
+				(n) => n.id === nodeToRemove.id,
 			);
 			if (nodeIndex >= 0) {
-				// Assign to a random AI competitor
-				const randomAI =
-					aiCompetitors[Math.floor(Math.random() * aiCompetitors.length)];
-				pyramid.nodes[nodeIndex].aiControlled = true;
-				pyramid.nodes[nodeIndex].aiStrategy = randomAI.strategy;
-				pyramid.nodes[nodeIndex].name = `${randomAI.name}'s Recruit`;
+				pyramid.nodes.splice(nodeIndex, 1);
 			}
-		}
-	}
 
-	// Final check: count actual player-owned nodes that aren't the player
-	const finalPlayerOwnedNodes = pyramid.nodes.filter(
-		(node) => node.ownedByPlayer && !node.isPlayerPosition,
-	);
-	const initialRecruits = finalPlayerOwnedNodes.length;
+			// Remove all links connected to this node
+			pyramid.links = pyramid.links.filter(
+				(link) =>
+					link.source !== nodeToRemove.id && link.target !== nodeToRemove.id,
+			);
+		}
+
+		// Update the recruit count
+		initialRecruits = 2;
+		console.log(
+			`After removal: Pyramid has ${pyramid.nodes.length} nodes and ${pyramid.links.length} links`,
+		);
+	}
 
 	console.log(
 		`Player starting with ${initialRecruits} recruits and ${Object.keys(playerInventory).length} product types`,
@@ -516,10 +622,131 @@ const processDayCycle = (state: GameState): GameState => {
 		"background: #3f51b5; color: white; padding: 2px 5px; border-radius: 3px;",
 	);
 
-	// 1. Generate potential recruits based on charisma - REMOVED as recruitment is now only via marketing events
+	// 1. AI behavior: buy inventory and manage sales
+	// Process AI nodes - buy inventory and process random sales
+	updatedNodes = updatedNodes.map((node) => {
+		// Skip player nodes and nodes without AI control
+		if (node.isPlayerPosition || !node.aiControlled) {
+			return node;
+		}
 
-	// 2. Process AI behaviors
-	// For simplicity, AI takes turns recruiting nodes
+		// Initialize node inventory if it doesn't exist
+		const nodeInventory = node.inventory || {};
+		let nodeMoney = node.money || 0;
+		let updatedInventory = { ...nodeInventory };
+
+		// Products that this AI node might want to buy
+		// Higher level nodes (closer to top) prefer more expensive products
+		const aiProducts = [...state.products].sort((a, b) => {
+			// If aggressive strategy, prefer higher margin products
+			if (node.aiStrategy === "aggressive") {
+				const marginA = a.basePrice - a.baseCost;
+				const marginB = b.basePrice - b.baseCost;
+				return marginB - marginA;
+			}
+			// If steady strategy, prefer products that sell more consistently
+			return b.baseChance - a.baseChance;
+		});
+
+		// AI nodes buy inventory if they have enough money and space
+		const totalInventory = Object.values(updatedInventory).reduce(
+			(sum, qty) => sum + qty,
+			0,
+		);
+		const inventorySpace = node.maxInventory - totalInventory;
+
+		if (inventorySpace > 0 && nodeMoney > 50) {
+			// AI node decides to buy products with 60% chance
+			if (Math.random() < 0.6) {
+				const product = aiProducts[0]; // Pick the preferred product
+
+				// Determine quantity based on strategy and money
+				let buyQuantity;
+				if (node.aiStrategy === "aggressive") {
+					// Aggressive nodes spend more on inventory
+					buyQuantity = Math.min(
+						Math.floor(nodeMoney / (product.baseCost * 2)),
+						inventorySpace,
+						5 + Math.floor(Math.random() * 5), // 5-10 items
+					);
+				} else {
+					// Steady nodes are more conservative
+					buyQuantity = Math.min(
+						Math.floor(nodeMoney / (product.baseCost * 3)),
+						inventorySpace,
+						3 + Math.floor(Math.random() * 3), // 3-5 items
+					);
+				}
+
+				// Ensure at least 1 item if buying
+				if (buyQuantity > 0) {
+					const cost = product.baseCost * buyQuantity;
+
+					// Update inventory and deduct money
+					updatedInventory[product.id] =
+						(updatedInventory[product.id] || 0) + buyQuantity;
+					nodeMoney -= cost;
+
+					console.log(
+						`[AI PURCHASE] ${node.name || "AI Node"} bought ${buyQuantity} ${product.name} for $${cost}`,
+					);
+				}
+			}
+		}
+
+		// Process random sales for AI node
+		// Similar to how player would automatically sell to random people
+		for (const product of state.products) {
+			const productQuantity = updatedInventory[product.id] || 0;
+
+			if (productQuantity > 0) {
+				// Calculate sale chance based on node level and product
+				// Higher level nodes are better at selling
+				const levelBonus = (7 - node.level) * 0.02; // 0-6% bonus based on level
+				const saleChance = Math.min(0.7, product.baseChance + levelBonus);
+
+				// Determine how many sales attempts to make based on inventory
+				const saleAttempts = Math.min(
+					productQuantity,
+					1 + Math.floor(Math.random() * 3),
+				); // 1-3 attempts
+
+				let salesMade = 0;
+				for (let i = 0; i < saleAttempts; i++) {
+					if (Math.random() < saleChance) {
+						salesMade++;
+					}
+				}
+
+				// Process successful sales
+				if (salesMade > 0) {
+					// Remove sold items from inventory
+					updatedInventory[product.id] = Math.max(
+						0,
+						productQuantity - salesMade,
+					);
+
+					// Add money from sales
+					const revenue = salesMade * product.basePrice;
+					nodeMoney += revenue;
+
+					console.log(
+						`[AI SALES] ${node.name || "AI Node"} sold ${salesMade} ${product.name} for $${revenue}`,
+					);
+				}
+			}
+		}
+
+		// Return updated node
+		return {
+			...node,
+			money: nodeMoney,
+			inventory: updatedInventory,
+			lastUpdated: Date.now(),
+		};
+	});
+
+	// 2. Process AI recruitment behavior (keeping existing logic)
 	// Make the AI more competitive by giving them a chance to recruit nodes
 	const aiChanceToRecruit = AI_NODE_RECRUIT_CHANCE; // Chance for AI to try recruiting
 	const shouldAIRecruit = Math.random() < aiChanceToRecruit;
@@ -563,6 +790,8 @@ const processDayCycle = (state: GameState): GameState => {
 							aiStrategy: Math.random() < 0.5 ? "aggressive" : "steady",
 							name: `Competitor ${Math.floor(Math.random() * 1000)}`,
 							lastUpdated: Date.now(),
+							inventory: updatedNodes[parentNodeIndex].inventory || {},
+							maxInventory: DEFAULT_MAX_INVENTORY,
 						};
 					}
 
@@ -579,6 +808,8 @@ const processDayCycle = (state: GameState): GameState => {
 							aiStrategy: updatedNodes[parentNodeIndex].aiStrategy,
 							name: `${updatedNodes[parentNodeIndex].name}'s Recruit`,
 							lastUpdated: Date.now(),
+							inventory: {}, // Initialize empty inventory
+							maxInventory: DEFAULT_MAX_INVENTORY,
 						};
 
 						pyramidChanged = true;
@@ -609,27 +840,117 @@ const processDayCycle = (state: GameState): GameState => {
 		}
 	}
 
-	// Calculate player stats
-	let updatedPlayer = { ...state.player };
+	// 3. Process downflow sales for AI nodes (selling to nodes beneath them)
+	// Find all AI nodes with inventory
+	const aiNodesWithInventory = updatedNodes.filter(
+		(node) =>
+			node.aiControlled &&
+			node.inventory &&
+			Object.values(node.inventory).some((qty) => qty > 0),
+	);
 
-	// Process product sales (for both AI and player)
-	// For now, keep this simple - just simulate some money being made by owned nodes
-	// This can be expanded later with more complex sales mechanics
-	updatedNodes = updatedNodes.map((node) => {
-		if (node.ownedByPlayer || node.aiControlled) {
-			// Generate some random money for the node based on level
-			// Higher level nodes (closer to top) make more money
-			const moneyGenerated = Math.floor(
-				Math.random() * (8 - node.level) * 20 + 10,
-			);
+	// For each AI node with inventory, try to sell to nodes beneath them
+	for (const aiNode of aiNodesWithInventory) {
+		// Find nodes directly below this AI node
+		const nodesBelow = getNodesBelow(updatedPyramid, aiNode.id);
+		const belowAINodes = nodesBelow.filter(
+			(node) => node.aiControlled && !node.isPlayerPosition,
+		);
 
-			return {
-				...node,
-				money: node.money + moneyGenerated,
-			};
+		if (belowAINodes.length > 0 && Math.random() < 0.4) {
+			// 40% chance to attempt downstream sales
+			// Pick a random product to sell from inventory
+			const productsInInventory = Object.entries(aiNode.inventory || {})
+				.filter(([_, qty]) => qty > 0)
+				.map(([id]) => id);
+
+			if (productsInInventory.length > 0) {
+				const randomProductId =
+					productsInInventory[
+						Math.floor(Math.random() * productsInInventory.length)
+					];
+				const product = state.products.find((p) => p.id === randomProductId);
+
+				if (product) {
+					// Pick a random node below to sell to
+					const targetBelowNode =
+						belowAINodes[Math.floor(Math.random() * belowAINodes.length)];
+					const targetNodeIndex = updatedNodes.findIndex(
+						(n) => n.id === targetBelowNode.id,
+					);
+
+					if (targetNodeIndex >= 0) {
+						// Calculate available space in target node
+						const targetInventory =
+							updatedNodes[targetNodeIndex].inventory || {};
+						const totalTargetInventory = Object.values(targetInventory).reduce(
+							(sum, qty) => sum + qty,
+							0,
+						);
+						const availableSpace =
+							updatedNodes[targetNodeIndex].maxInventory - totalTargetInventory;
+
+						if (availableSpace > 0) {
+							// Determine quantity to sell (1-3 items)
+							const sellQuantity = Math.min(
+								1 + Math.floor(Math.random() * 2),
+								aiNode.inventory[randomProductId] || 0,
+								availableSpace,
+							);
+
+							if (sellQuantity > 0) {
+								// Update seller's inventory
+								const sellerNodeIndex = updatedNodes.findIndex(
+									(n) => n.id === aiNode.id,
+								);
+								const sellerInventory = {
+									...updatedNodes[sellerNodeIndex].inventory,
+								};
+								sellerInventory[randomProductId] = Math.max(
+									0,
+									(sellerInventory[randomProductId] || 0) - sellQuantity,
+								);
+
+								// Update buyer's inventory and money
+								const buyerInventory = { ...targetInventory };
+								buyerInventory[randomProductId] =
+									(buyerInventory[randomProductId] || 0) + sellQuantity;
+
+								// Calculate revenue using downsell price
+								const revenue = sellQuantity * product.downsellPrice;
+
+								// If buyer has enough money, complete the transaction
+								if (updatedNodes[targetNodeIndex].money >= revenue) {
+									// Update seller
+									updatedNodes[sellerNodeIndex] = {
+										...updatedNodes[sellerNodeIndex],
+										inventory: sellerInventory,
+										money: (updatedNodes[sellerNodeIndex].money || 0) + revenue,
+										lastUpdated: Date.now(),
+									};
+
+									// Update buyer
+									updatedNodes[targetNodeIndex] = {
+										...updatedNodes[targetNodeIndex],
+										inventory: buyerInventory,
+										money: updatedNodes[targetNodeIndex].money - revenue,
+										lastUpdated: Date.now(),
+									};
+
+									console.log(
+										`[AI DOWNSTREAM] ${aiNode.name || "AI Node"} sold ${sellQuantity} ${product.name} to ${updatedNodes[targetNodeIndex].name || "downstream"} for $${revenue}`,
+									);
+								}
+							}
+						}
+					}
+				}
+			}
 		}
-		return node;
-	});
+	}
+
+	// 4. Process player random sales (unchanged)
+	// This is left for the player to be processed separately
 
 	updatedPyramid = {
 		...updatedPyramid,
@@ -641,17 +962,22 @@ const processDayCycle = (state: GameState): GameState => {
 		updatedPyramid = incrementPyramidVersion(updatedPyramid);
 		console.log(`[PYRAMID] Version updated to ${updatedPyramid.version}`);
 	} else {
-		console.log("[PYRAMID] No changes to pyramid structure");
+		updatedPyramid = {
+			...updatedPyramid,
+			version: updatedPyramid.version + 1, // Always update version to refresh UI
+		};
+		console.log(
+			"[PYRAMID] No structural changes to pyramid, but refreshing UI",
+		);
 	}
 
 	return {
 		...state,
 		pyramid: updatedPyramid,
 		player: {
-			...updatedPlayer,
+			...state.player,
 			recruits: newRecruits,
 		},
-		// Removed pendingRecruits field
 	};
 };
 
@@ -688,8 +1014,11 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 			lastDailyEnergyBonus: Date.now(), // Set the timestamp when the bonus was given
 		};
 
-		// Now process day cycle for recruitment attempts
+		// Now process day cycle for recruitment attempts, AI behavior, etc.
 		updatedState = processDayCycle(updatedState);
+
+		// Process player's automatic product sales to random people
+		updatedState = processPlayerRandomSales(updatedState);
 	}
 
 	// Process active marketing events
@@ -736,6 +1065,80 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 	};
 };
 
+// Helper function to process player's random product sales
+const processPlayerRandomSales = (state: GameState): GameState => {
+	console.log(`Processing player's random product sales`);
+
+	let playerInventory = { ...state.player.inventory };
+	let playerMoney = state.player.money;
+	let totalSalesRandom = state.player.totalSalesRandom;
+	let totalRevenue = 0;
+	let totalItemsSold = 0;
+
+	// Try to sell each product type
+	for (const product of state.products) {
+		const productQuantity = playerInventory[product.id] || 0;
+
+		if (productQuantity > 0) {
+			// Calculate sale chance based on charisma and product
+			const charismaBonus = state.player.charisma * 0.05; // 5% per charisma point
+			const saleChance = Math.min(0.95, product.baseChance + charismaBonus);
+
+			// Determine how many sales attempts based on inventory and charisma
+			// More charisma = more sales attempts per day
+			const saleAttempts = Math.min(
+				productQuantity,
+				1 +
+					Math.floor(state.player.charisma / 2) +
+					Math.floor(Math.random() * 3),
+			);
+
+			let salesMade = 0;
+			for (let i = 0; i < saleAttempts; i++) {
+				if (Math.random() < saleChance) {
+					salesMade++;
+				}
+			}
+
+			// Process successful sales
+			if (salesMade > 0) {
+				// Remove sold items from inventory
+				playerInventory[product.id] = Math.max(0, productQuantity - salesMade);
+
+				// Add money from sales
+				const revenue = salesMade * product.basePrice;
+				playerMoney += revenue;
+				totalRevenue += revenue;
+				totalItemsSold += salesMade;
+				totalSalesRandom += salesMade;
+
+				console.log(
+					`[PLAYER SALES] Automatically sold ${salesMade} ${product.name} for $${revenue} (${Math.round(saleChance * 100)}% chance)`,
+				);
+			}
+		}
+	}
+
+	if (totalItemsSold > 0) {
+		console.log(
+			`[PLAYER SALES] Total daily sales: ${totalItemsSold} items for $${totalRevenue}`,
+		);
+	} else {
+		console.log(`[PLAYER SALES] No sales made today`);
+	}
+
+	// Update player stats
+	return {
+		...state,
+		player: {
+			...state.player,
+			inventory: playerInventory,
+			money: playerMoney,
+			totalSalesRandom: totalSalesRandom,
+		},
+	};
+};
+
 // Helper function to process recruitment marketing events
 const processRecruitmentEvent = (
 	state: GameState,
@@ -767,8 +1170,30 @@ const processRecruitmentEvent = (
 		return state;
 	}
 
+	// Count current player-owned nodes (excluding player position)
+	const currentOwnedNodes = updatedNodes.filter(
+		(node) => node.ownedByPlayer && !node.isPlayerPosition,
+	).length;
+
+	// Only process recruitment if we have fewer than 2 recruits
+	const maxRecruits = 2;
+	const remainingSlots = Math.max(0, maxRecruits - currentOwnedNodes);
+
+	if (remainingSlots <= 0) {
+		console.log(
+			`Already at maximum ${maxRecruits} recruits, no new recruits will be added`,
+		);
+		return state;
+	}
+
+	// Process only as many recruits as we have slots for
+	const attemptsToProcess = Math.min(successAttempts, remainingSlots);
+	console.log(
+		`Processing ${attemptsToProcess} out of ${successAttempts} successful recruits`,
+	);
+
 	// Process each successful recruit attempt
-	for (let i = 0; i < successAttempts; i++) {
+	for (let i = 0; i < attemptsToProcess; i++) {
 		// Calculate recruitment chance based on player stats and event
 		const baseChance = 0.12 + state.player.charisma * 0.02;
 		const recruitingBonus = state.player.recruitingPower * 0.06;
@@ -819,13 +1244,12 @@ const processRecruitmentEvent = (
 					maxInventory: DEFAULT_MAX_INVENTORY,
 				};
 
-				// Propagate ownership down from this new recruit to all nodes below it
-				updatedPyramid = propagateOwnership(updatedPyramid, result.newNodeId);
-				updatedNodes = updatedPyramid.nodes;
-
+				// Instead of propagating ownership, just mark this new node
+				// This avoids exceeding our 2-recruit limit
 				pyramidChanged = true;
 				newRecruits++;
 
+				console.log(`Recruits count increased to ${newRecruits}`);
 				console.log(
 					`Marketing event success: Added new recruit node at level ${playerNode.level + 1}, ID: ${result.newNodeId}`,
 				);

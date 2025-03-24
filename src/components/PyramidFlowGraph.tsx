@@ -302,8 +302,8 @@ const PyramidFlowInner = ({
 					<StatsOverlay>
 						<div>Total Nodes: {pyramid.nodes.length}</div>
 						<div>
-							Player Owned:{" "}
-							{pyramid.nodes.filter((n) => n.ownedByPlayer).length}
+							Player Owned: {playerStats?.recruits + 1}{" "}
+							{/* +1 for player's own node */}
 						</div>
 						<div>
 							AI Owned: {pyramid.nodes.filter((n) => n.aiControlled).length}
