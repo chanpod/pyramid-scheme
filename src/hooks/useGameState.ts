@@ -1,5 +1,11 @@
 import { useReducer, useEffect } from "react";
-import { GameState, GameAction, PlayerStats, PyramidGraph } from "../types";
+import {
+	GameState,
+	GameAction,
+	PlayerStats,
+	PyramidGraph,
+	MarketingEvent,
+} from "../types";
 import {
 	generatePyramid,
 	getNodesAbove,
@@ -7,13 +13,14 @@ import {
 	addNodeToPyramid,
 	hasParent,
 } from "../utils/pyramidGenerator";
+import React from "react";
 
 // Constants for game mechanics
 const HOURS_PER_DAY = 24;
 const MAX_ENERGY = 20;
 const REST_ENERGY_PER_HOUR = 0.5; // Energy gained per hour of rest
 const ENERGY_COST = 800; // Cost to buy energy
-const PRODUCT_BUY_ENERGY_COST = 5; // Energy cost to buy products
+export const PRODUCT_BUY_ENERGY_COST = 5; // Energy cost to buy products
 const NEW_RECRUIT_CHANCE = 0.08; // Chance for a successful recruit to generate new potential recruits (significantly reduced from 0.15)
 const MONEY_RECRUITMENT_FACTOR = 0.00005; // How much money affects recruitment (reduced from 0.00008)
 const BASE_RECRUITMENT_CHANCE = 0.12; // Base recruitment success chance (significantly reduced from 0.25)
@@ -29,6 +36,12 @@ const PUBLIC_WORKSHOP_DURATION = 168; // 168 hours (7 days)
 const SOCIAL_MEDIA_ENERGY = 2;
 const HOME_PARTY_ENERGY = 5;
 const PUBLIC_WORKSHOP_ENERGY = 8;
+
+// Event success chances (updated)
+const SOCIAL_MEDIA_SUCCESS_CHANCE = 0.25; // 25% base chance for social media
+const HOME_PARTY_SUCCESS_CHANCE = 0.35; // 35% base chance for home party
+const WORKSHOP_SUCCESS_CHANCE = 0.75; // 75% base chance for workshop
+const WORKSHOP_EXTRA_RECRUIT_CHANCE = 0.1; // 10% chance for extra recruit in workshops
 
 // Investment multipliers for recruitment events
 const MIN_INVESTMENT = 50;
@@ -702,7 +715,7 @@ const processDayCycle = (state: GameState): GameState => {
 			if (productQuantity > 0) {
 				// Calculate sale chance based on node level and product
 				// Higher level nodes are better at selling
-				const levelBonus = (7 - node.level) * 0.02; // 0-6% bonus based on level
+				const levelBonus = (7 - node.level) * 0.02;
 				const saleChance = Math.min(0.7, product.baseChance + levelBonus);
 
 				// Determine how many sales attempts to make based on inventory
@@ -840,16 +853,19 @@ const processDayCycle = (state: GameState): GameState => {
 		}
 	}
 
-	// 3. Process downflow sales for AI nodes (selling to nodes beneath them)
-	// Find all AI nodes with inventory
+	// 3. Process inventory trading and recursive selling with commissions
+	// First, make a copy of updated nodes to track changes during this process
+	let nodesAfterTrading = [...updatedNodes];
+
+	// Random chance to trade inventory from upstream to downstream nodes
 	const aiNodesWithInventory = updatedNodes.filter(
 		(node) =>
 			node.aiControlled &&
 			node.inventory &&
-			Object.values(node.inventory).some((qty) => qty > 0),
+			Object.values(node.inventory || {}).some((qty) => qty > 0),
 	);
 
-	// For each AI node with inventory, try to sell to nodes beneath them
+	// For each AI node with inventory, try to trade with nodes beneath them
 	for (const aiNode of aiNodesWithInventory) {
 		// Find nodes directly below this AI node
 		const nodesBelow = getNodesBelow(updatedPyramid, aiNode.id);
@@ -857,11 +873,11 @@ const processDayCycle = (state: GameState): GameState => {
 			(node) => node.aiControlled && !node.isPlayerPosition,
 		);
 
+		// Random chance to attempt trades with downstream nodes (40% chance)
 		if (belowAINodes.length > 0 && Math.random() < 0.4) {
-			// 40% chance to attempt downstream sales
-			// Pick a random product to sell from inventory
+			// Pick a random product to trade from inventory
 			const productsInInventory = Object.entries(aiNode.inventory || {})
-				.filter(([_, qty]) => qty > 0)
+				.filter(([_, qty]) => (qty || 0) > 0)
 				.map(([id]) => id);
 
 			if (productsInInventory.length > 0) {
@@ -872,75 +888,69 @@ const processDayCycle = (state: GameState): GameState => {
 				const product = state.products.find((p) => p.id === randomProductId);
 
 				if (product) {
-					// Pick a random node below to sell to
+					// Pick a random node below to trade with
 					const targetBelowNode =
 						belowAINodes[Math.floor(Math.random() * belowAINodes.length)];
-					const targetNodeIndex = updatedNodes.findIndex(
+					const targetNodeIndex = nodesAfterTrading.findIndex(
 						(n) => n.id === targetBelowNode.id,
 					);
 
 					if (targetNodeIndex >= 0) {
 						// Calculate available space in target node
 						const targetInventory =
-							updatedNodes[targetNodeIndex].inventory || {};
+							nodesAfterTrading[targetNodeIndex].inventory || {};
 						const totalTargetInventory = Object.values(targetInventory).reduce(
 							(sum, qty) => sum + qty,
 							0,
 						);
 						const availableSpace =
-							updatedNodes[targetNodeIndex].maxInventory - totalTargetInventory;
+							nodesAfterTrading[targetNodeIndex].maxInventory -
+							totalTargetInventory;
 
 						if (availableSpace > 0) {
-							// Determine quantity to sell (1-3 items)
-							const sellQuantity = Math.min(
+							// Determine quantity to trade (1-3 items)
+							const tradeQuantity = Math.min(
 								1 + Math.floor(Math.random() * 2),
-								aiNode.inventory[randomProductId] || 0,
+								aiNode.inventory?.[randomProductId] || 0,
 								availableSpace,
 							);
 
-							if (sellQuantity > 0) {
+							if (tradeQuantity > 0) {
 								// Update seller's inventory
-								const sellerNodeIndex = updatedNodes.findIndex(
+								const sellerNodeIndex = nodesAfterTrading.findIndex(
 									(n) => n.id === aiNode.id,
 								);
 								const sellerInventory = {
-									...updatedNodes[sellerNodeIndex].inventory,
+									...nodesAfterTrading[sellerNodeIndex].inventory,
 								};
 								sellerInventory[randomProductId] = Math.max(
 									0,
-									(sellerInventory[randomProductId] || 0) - sellQuantity,
+									(sellerInventory[randomProductId] || 0) - tradeQuantity,
 								);
 
-								// Update buyer's inventory and money
+								// Update buyer's inventory
 								const buyerInventory = { ...targetInventory };
 								buyerInventory[randomProductId] =
-									(buyerInventory[randomProductId] || 0) + sellQuantity;
+									(buyerInventory[randomProductId] || 0) + tradeQuantity;
 
-								// Calculate revenue using downsell price
-								const revenue = sellQuantity * product.downsellPrice;
+								// Even trade - no money exchanges hands in trading phase
+								// Update seller
+								nodesAfterTrading[sellerNodeIndex] = {
+									...nodesAfterTrading[sellerNodeIndex],
+									inventory: sellerInventory,
+									lastUpdated: Date.now(),
+								};
 
-								// If buyer has enough money, complete the transaction
-								if (updatedNodes[targetNodeIndex].money >= revenue) {
-									// Update seller
-									updatedNodes[sellerNodeIndex] = {
-										...updatedNodes[sellerNodeIndex],
-										inventory: sellerInventory,
-										money: (updatedNodes[sellerNodeIndex].money || 0) + revenue,
-										lastUpdated: Date.now(),
-									};
+								// Update buyer
+								nodesAfterTrading[targetNodeIndex] = {
+									...nodesAfterTrading[targetNodeIndex],
+									inventory: buyerInventory,
+									lastUpdated: Date.now(),
+								};
 
-									// Update buyer
-									updatedNodes[targetNodeIndex] = {
-										...updatedNodes[targetNodeIndex],
-										inventory: buyerInventory,
-										money: updatedNodes[targetNodeIndex].money - revenue,
-										lastUpdated: Date.now(),
-									};
-
-									console.log(
-										`[AI DOWNSTREAM] ${aiNode.name || "AI Node"} sold ${sellQuantity} ${product.name} to ${updatedNodes[targetNodeIndex].name || "downstream"} for $${revenue}`,
-									);
-								}
+								console.log(
+									`[INVENTORY TRADE] ${aiNode.name || "AI Node"} traded ${tradeQuantity} ${product.name} to ${nodesAfterTrading[targetNodeIndex].name || "downstream"}`,
+								);
 							}
 						}
 					}
@@ -949,9 +959,275 @@ const processDayCycle = (state: GameState): GameState => {
 		}
 	}
 
-	// 4. Process player random sales (unchanged)
-	// This is left for the player to be processed separately
+	// 4. ADDED: Process player inventory trading
+	// Find player node and player-owned nodes with inventory
+	const playerNode = nodesAfterTrading.find((node) => node.isPlayerPosition);
+	if (playerNode && playerNode.inventory) {
+		// Find nodes directly below the player
+		const playerNodesBelow = getNodesBelow(updatedPyramid, playerNode.id);
+		const playerOwnedNodesBelow = playerNodesBelow.filter(
+			(node) => node.ownedByPlayer,
+		);
 
+		// Only attempt trades if player has downstream nodes and there's a 50% chance (higher than AI)
+		if (playerOwnedNodesBelow.length > 0 && Math.random() < 0.5) {
+			// Get products that the player has in inventory
+			const playerProducts = Object.entries(playerNode.inventory)
+				.filter(([_, qty]) => (qty || 0) > 0)
+				.map(([id]) => id);
+
+			if (playerProducts.length > 0) {
+				// Pick a random product to trade
+				const randomProductId =
+					playerProducts[Math.floor(Math.random() * playerProducts.length)];
+				const product = state.products.find((p) => p.id === randomProductId);
+
+				if (product) {
+					// Pick a random downstream node to trade with
+					const targetNode =
+						playerOwnedNodesBelow[
+							Math.floor(Math.random() * playerOwnedNodesBelow.length)
+						];
+					const targetNodeIndex = nodesAfterTrading.findIndex(
+						(n) => n.id === targetNode.id,
+					);
+
+					if (targetNodeIndex >= 0) {
+						// Calculate available space
+						const targetInventory =
+							nodesAfterTrading[targetNodeIndex].inventory || {};
+						const totalTargetInventory = Object.values(targetInventory).reduce(
+							(sum, qty) => sum + qty,
+							0,
+						);
+						const availableSpace =
+							nodesAfterTrading[targetNodeIndex].maxInventory -
+							totalTargetInventory;
+
+						if (availableSpace > 0) {
+							// Determine trade quantity (1-3 items)
+							const tradeQuantity = Math.min(
+								1 + Math.floor(Math.random() * 2),
+								playerNode.inventory[randomProductId] || 0,
+								availableSpace,
+							);
+
+							if (tradeQuantity > 0) {
+								// Update player's inventory
+								const playerNodeIndex = nodesAfterTrading.findIndex(
+									(n) => n.id === playerNode.id,
+								);
+								const updatedPlayerInventory = {
+									...nodesAfterTrading[playerNodeIndex].inventory,
+								};
+								updatedPlayerInventory[randomProductId] = Math.max(
+									0,
+									(updatedPlayerInventory[randomProductId] || 0) -
+										tradeQuantity,
+								);
+
+								// Update target node's inventory
+								const updatedTargetInventory = { ...targetInventory };
+								updatedTargetInventory[randomProductId] =
+									(updatedTargetInventory[randomProductId] || 0) +
+									tradeQuantity;
+
+								// Update player node
+								nodesAfterTrading[playerNodeIndex] = {
+									...nodesAfterTrading[playerNodeIndex],
+									inventory: updatedPlayerInventory,
+									lastUpdated: Date.now(),
+								};
+
+								// Update target node
+								nodesAfterTrading[targetNodeIndex] = {
+									...nodesAfterTrading[targetNodeIndex],
+									inventory: updatedTargetInventory,
+									lastUpdated: Date.now(),
+								};
+
+								console.log(
+									`[PLAYER TRADE] You traded ${tradeQuantity} ${product.name} to your downstream recruit`,
+								);
+
+								// Also update player's actual inventory in the game state
+								state = {
+									...state,
+									player: {
+										...state.player,
+										inventory: updatedPlayerInventory,
+									},
+								};
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// After trading, process sales and commissions recursively
+	// This is the second phase where nodes try to sell products and pass commissions up
+	// We need to process from bottom to top to ensure commissions flow upward correctly
+
+	// Get all AI nodes sorted by level (bottom to top)
+	const sortedAINodes = nodesAfterTrading
+		.filter((node) => node.aiControlled)
+		.sort((a, b) => b.level - a.level); // Sort by level descending (bottom to top)
+
+	// Get all player-owned nodes (except player position) sorted the same way
+	const playerOwnedNodes = nodesAfterTrading
+		.filter((node) => node.ownedByPlayer && !node.isPlayerPosition)
+		.sort((a, b) => b.level - a.level);
+
+	// Combine both sets of nodes for processing, ensuring player nodes are included
+	const allNodesToProcess = [...sortedAINodes, ...playerOwnedNodes];
+
+	// For each node (starting from bottom), try to sell and pass commissions up
+	for (const node of allNodesToProcess) {
+		// Skip if no inventory
+		if (
+			!node.inventory ||
+			Object.values(node.inventory).every((qty) => qty === 0)
+		) {
+			continue;
+		}
+
+		// Calculate sales and revenue
+		let nodeRevenue = 0;
+
+		// Process random sales for this node
+		for (const product of state.products) {
+			const productQuantity = node.inventory[product.id] || 0;
+
+			if (productQuantity > 0) {
+				// Chance to make a sale based on level and product
+				// Player-owned nodes get a bonus to sale chance
+				const levelBonus = (7 - node.level) * 0.02;
+				const ownershipBonus = node.ownedByPlayer ? 0.1 : 0; // 10% bonus for player-owned nodes
+				const saleChance = Math.min(
+					0.6, // Increased max chance
+					product.baseChance + levelBonus + ownershipBonus,
+				);
+
+				// Try to sell up to 2 items
+				const maxSaleAttempts = Math.min(2, productQuantity);
+				let salesMade = 0;
+
+				for (let i = 0; i < maxSaleAttempts; i++) {
+					if (Math.random() < saleChance) {
+						salesMade++;
+					}
+				}
+
+				if (salesMade > 0) {
+					// Calculate revenue
+					const saleRevenue = salesMade * product.basePrice;
+					nodeRevenue += saleRevenue;
+
+					// Update inventory
+					const nodeIndex = nodesAfterTrading.findIndex(
+						(n) => n.id === node.id,
+					);
+					if (nodeIndex >= 0) {
+						const updatedNodeInventory = {
+							...nodesAfterTrading[nodeIndex].inventory,
+						};
+						updatedNodeInventory[product.id] = Math.max(
+							0,
+							productQuantity - salesMade,
+						);
+
+						nodesAfterTrading[nodeIndex] = {
+							...nodesAfterTrading[nodeIndex],
+							inventory: updatedNodeInventory,
+						};
+					}
+
+					const nodeType = node.ownedByPlayer
+						? "Your recruit"
+						: node.name || "AI Node";
+					console.log(
+						`[RECURSIVE SALES] ${nodeType} sold ${salesMade} ${product.name} for $${saleRevenue}`,
+					);
+				}
+			}
+		}
+
+		// If revenue was generated, distribute commissions up the pyramid
+		if (nodeRevenue > 0) {
+			// Find the current node's index
+			const currentNodeIndex = nodesAfterTrading.findIndex(
+				(n) => n.id === node.id,
+			);
+
+			// First, the node itself keeps 80% of revenue
+			nodesAfterTrading[currentNodeIndex] = {
+				...nodesAfterTrading[currentNodeIndex],
+				money:
+					(nodesAfterTrading[currentNodeIndex].money || 0) + nodeRevenue * 0.8,
+				lastUpdated: Date.now(),
+			};
+
+			// Then, distribute 20% commission to the node above
+			const nodesAbove = getNodesAbove(updatedPyramid, node.id);
+
+			if (nodesAbove.length > 0) {
+				// For simplicity, we'll give commission to the first node above
+				const upstreamNode = nodesAbove[0];
+				const upstreamNodeIndex = nodesAfterTrading.findIndex(
+					(n) => n.id === upstreamNode.id,
+				);
+
+				if (upstreamNodeIndex >= 0) {
+					const commission = nodeRevenue * 0.2; // 20% commission
+
+					// Check if the upstream node is the player's position
+					if (nodesAfterTrading[upstreamNodeIndex].isPlayerPosition) {
+						// If player is the upstream node, add commission to player's money directly
+						state = {
+							...state,
+							player: {
+								...state.player,
+								money: state.player.money + commission,
+							},
+						};
+
+						console.log(
+							`[COMMISSION] You received $${commission.toFixed(2)} commission from your downstream recruit's sales`,
+						);
+					} else {
+						// Otherwise add commission to the node's money
+						nodesAfterTrading[upstreamNodeIndex] = {
+							...nodesAfterTrading[upstreamNodeIndex],
+							money:
+								(nodesAfterTrading[upstreamNodeIndex].money || 0) + commission,
+							lastUpdated: Date.now(),
+						};
+
+						const upstreamName = upstreamNode.isPlayerPosition
+							? "You"
+							: upstreamNode.aiControlled
+								? upstreamNode.name || "AI Node"
+								: "Your Network";
+
+						const downstreamName = node.ownedByPlayer
+							? "Your Recruit"
+							: node.name || "Downstream Node";
+
+						console.log(
+							`[COMMISSION] ${upstreamName} received $${commission.toFixed(2)} commission from ${downstreamName}`,
+						);
+					}
+				}
+			}
+		}
+	}
+
+	// Update nodes after trading and commission processing
+	updatedNodes = nodesAfterTrading;
+
+	// Update pyramid with new node states
 	updatedPyramid = {
 		...updatedPyramid,
 		nodes: updatedNodes,
@@ -1304,6 +1580,16 @@ const generateMarketingResults = (event: MarketingEvent): number => {
 		}
 	}
 
+	// Special case for workshops: 10% chance for extra recruit for each success
+	if (event.type === "workshop") {
+		for (let i = 0; i < successfulAttempts; i++) {
+			if (Math.random() < WORKSHOP_EXTRA_RECRUIT_CHANCE) {
+				successfulAttempts++;
+				console.log(`Workshop bonus: Extra recruit awarded!`);
+			}
+		}
+	}
+
 	console.log(
 		`Marketing event results: ${successfulAttempts} successes from ${totalAttempts} attempts (${Math.round(adjustedChance * 100)}% chance)`,
 	);
@@ -1323,6 +1609,30 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 	}
 
 	switch (action.type) {
+		case "ADVANCE_TIME": {
+			// Add console logging to help debug
+			console.log(
+				`[REDUCER] Processing ADVANCE_TIME action: ${action.hours} hours`,
+			);
+			// Call our existing advanceGameTime function to handle the time advancement
+			const newState = advanceGameTime(state, action.hours);
+			console.log(
+				`[REDUCER] Time advanced from ${state.gameDay}:${state.gameHour} to ${newState.gameDay}:${newState.gameHour}`,
+			);
+			return newState;
+		}
+
+		case "SET_GAME_OVER": {
+			console.log(
+				`[REDUCER] Setting game over: ${action.isWinner ? "WINNER" : "LOSER"}`,
+			);
+			return {
+				...state,
+				gameOver: true,
+				isWinner: action.isWinner,
+			};
+		}
+
 		case "NETWORK_MARKETING": {
 			const {
 				intensity,
@@ -1379,18 +1689,13 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 				return state;
 			}
 
-			// Calculate success chance based on charisma and reputation
-			const baseChance =
-				intensity === "light"
-					? 0.5 + player.charisma * 0.05
-					: intensity === "medium"
-						? 0.35 + player.charisma * 0.06
-						: 0.2 + player.charisma * 0.07;
-
-			const successChance = Math.min(
-				0.85,
-				baseChance + player.reputation * 0.02,
-			);
+			// Calculate success chance based on event type
+			const successChance =
+				eventType === "social-media"
+					? SOCIAL_MEDIA_SUCCESS_CHANCE
+					: eventType === "home-party"
+						? HOME_PARTY_SUCCESS_CHANCE
+						: WORKSHOP_SUCCESS_CHANCE;
 
 			// Calculate max attempts based on charisma
 			const maxAttempts =
@@ -1564,45 +1869,124 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 		}
 
 		case "UPGRADE_CHARISMA": {
-			const upgradeCost = state.player.charisma * 200;
+			// Cost formula: 100 + (current charisma * 75)
+			const cost = 100 + state.player.charisma * 75;
 
-			if (state.player.money < upgradeCost) {
+			// Check if player has enough money
+			if (state.player.money < cost) {
+				console.log(`Not enough money to upgrade charisma. Cost: $${cost}`);
 				return state;
 			}
 
-			// Upgrade charisma without advancing time
+			// Check if player has enough energy
+			if (state.player.energy < 1) {
+				console.log("Not enough energy to upgrade charisma");
+				return state;
+			}
+
+			console.log(
+				`[UPGRADE] Charisma upgraded from ${state.player.charisma} to ${state.player.charisma + 1} for $${cost}`,
+			);
+
+			// Apply the upgrade
 			return {
 				...state,
 				player: {
 					...state.player,
 					charisma: state.player.charisma + 1,
-					money: state.player.money - upgradeCost,
+					money: state.player.money - cost,
+					energy: state.player.energy - 1,
+				},
+				turns: state.turns + 1,
+			};
+		}
+
+		case "UPGRADE_RECRUITING": {
+			// Cost formula: 150 + (current recruitingPower * 100)
+			const cost = 150 + state.player.recruitingPower * 100;
+
+			// Check if player has enough money
+			if (state.player.money < cost) {
+				console.log(
+					`Not enough money to upgrade recruiting power. Cost: $${cost}`,
+				);
+				return state;
+			}
+
+			// Check if player has enough energy
+			if (state.player.energy < 1) {
+				console.log("Not enough energy to upgrade recruiting power");
+				return state;
+			}
+
+			console.log(
+				`[UPGRADE] Recruiting power upgraded from ${state.player.recruitingPower} to ${state.player.recruitingPower + 1} for $${cost}`,
+			);
+
+			// Apply the upgrade
+			return {
+				...state,
+				player: {
+					...state.player,
+					recruitingPower: state.player.recruitingPower + 1,
+					money: state.player.money - cost,
+					energy: state.player.energy - 1,
 				},
 				turns: state.turns + 1,
 			};
 		}
 
 		case "UPGRADE_ENERGY": {
-			// Increased cost for buying energy
-			const upgradeCost = ENERGY_COST;
+			// Fixed cost: 800
+			const cost = ENERGY_COST;
 
-			if (
-				state.player.money < upgradeCost ||
-				state.player.energy >= MAX_ENERGY
-			) {
+			// Check if player has enough money
+			if (state.player.money < cost) {
+				console.log(`Not enough money to buy energy. Cost: $${cost}`);
 				return state;
 			}
 
-			// Buy energy without advancing time
-			const energyToAdd = 5;
-			const newEnergy = Math.min(MAX_ENERGY, state.player.energy + energyToAdd);
+			console.log(`[UPGRADE] Purchased energy for $${cost}, +2 energy points`);
+
+			// Apply the purchase (no energy cost for this action)
+			return {
+				...state,
+				player: {
+					...state.player,
+					energy: state.player.energy + 2, // Gain 2 energy points
+					money: state.player.money - cost,
+				},
+				turns: state.turns + 1,
+			};
+		}
+
+		case "REST": {
+			const { hours } = action;
+
+			// You can't rest if you're already resting
+			if (state.player.isResting) {
+				return state;
+			}
+
+			// Calculate when the player will finish resting
+			const restUntil = state.gameDay * HOURS_PER_DAY + state.gameHour + hours;
+			const energyRecoveryRate = REST_ENERGY_PER_HOUR; // energy per hour
+			const totalEnergyRecovery = Math.min(
+				hours * energyRecoveryRate,
+				MAX_ENERGY - state.player.energy,
+			);
+
+			console.log(
+				`[REST] Player resting for ${hours} hours, will recover ${totalEnergyRecovery} energy`,
+			);
 
 			return {
 				...state,
 				player: {
 					...state.player,
-					energy: newEnergy,
-					money: state.player.money - upgradeCost,
+					isResting: true,
+					restUntil,
+					recoveryPercentage: totalEnergyRecovery / hours, // energy per hour
 				},
 				turns: state.turns + 1,
 			};
@@ -1611,44 +1995,48 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 		case "BUY_PRODUCT": {
 			const { productId, quantity } = action;
 
-			// Check if player has enough energy - buying product costs energy
-			if (state.player.energy < PRODUCT_BUY_ENERGY_COST) {
-				console.log(
-					`Not enough energy to buy products. Need ${PRODUCT_BUY_ENERGY_COST} energy.`,
-				);
-				return state;
-			}
-
 			// Find the product
 			const product = state.products.find((p) => p.id === productId);
 			if (!product) {
-				console.error(`Product ${productId} not found`);
+				console.log(`Product ${productId} not found`);
 				return state;
 			}
 
-			// Check if player has enough money
+			// Calculate total cost
 			const totalCost = product.baseCost * quantity;
+
+			// Check if player has enough money
 			if (state.player.money < totalCost) {
 				console.log(
-					`Not enough money to buy ${quantity} ${product.name}. Need $${totalCost}`,
+					`Not enough money to buy ${quantity} ${product.name}. Cost: $${totalCost}`,
 				);
 				return state;
 			}
 
-			// Update player inventory
-			const currentQuantity = state.player.inventory[productId] || 0;
-			const updatedInventory = {
-				...state.player.inventory,
-				[productId]: currentQuantity + quantity,
-			};
+			// Check if player has enough energy
+			if (state.player.energy < PRODUCT_BUY_ENERGY_COST) {
+				console.log(
+					`Not enough energy to buy products. Required: ${PRODUCT_BUY_ENERGY_COST}`,
+				);
+				return state;
+			}
+
+			// Update inventory
+			const updatedInventory = { ...state.player.inventory };
+			updatedInventory[productId] =
+				(updatedInventory[productId] || 0) + quantity;
+
+			console.log(
+				`[PURCHASE] Bought ${quantity} ${product.name} for $${totalCost}`,
+			);
 
 			return {
 				...state,
 				player: {
 					...state.player,
-					money: state.player.money - totalCost,
 					inventory: updatedInventory,
-					energy: state.player.energy - PRODUCT_BUY_ENERGY_COST, // Deduct energy for buying products
+					money: state.player.money - totalCost,
+					energy: state.player.energy - PRODUCT_BUY_ENERGY_COST,
 				},
 				turns: state.turns + 1,
 			};
@@ -1657,80 +2045,87 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 		case "SELL_DOWNSTREAM": {
 			const { productId, targetNodeId, quantity } = action;
 
+			// Check if player has enough energy
+			if (state.player.energy < 1) {
+				console.log("Not enough energy to sell to downstream node");
+				return state;
+			}
+
 			// Find the product
 			const product = state.products.find((p) => p.id === productId);
 			if (!product) {
-				console.error(`Product ${productId} not found`);
+				console.log(`Product ${productId} not found`);
+				return state;
+			}
+
+			// Check if player has enough of this product
+			if ((state.player.inventory[productId] || 0) < quantity) {
+				console.log(`Not enough ${product.name} in inventory`);
 				return state;
 			}
 
 			// Find the target node
 			const targetNodeIndex = state.pyramid.nodes.findIndex(
-				(node) => node.id === targetNodeId && node.ownedByPlayer,
+				(node) => node.id === targetNodeId,
 			);
-
 			if (targetNodeIndex === -1) {
-				console.error(
-					`Target node ${targetNodeId} not found or not owned by player`,
-				);
+				console.log(`Target node ${targetNodeId} not found`);
 				return state;
 			}
 
 			const targetNode = state.pyramid.nodes[targetNodeIndex];
 
-			// Check if player has enough inventory
-			const playerCurrentQuantity = state.player.inventory[productId] || 0;
-			if (playerCurrentQuantity < quantity) {
+			// Check if target node is player-owned
+			if (!targetNode.ownedByPlayer) {
+				console.log("Can only sell to player-owned nodes");
+				return state;
+			}
+
+			// Check if target node has enough room in inventory
+			const targetInventory = targetNode.inventory || {};
+			const currentQuantity = targetInventory[productId] || 0;
+
+			// Calculate total inventory in target node
+			const totalInventory = Object.values(targetInventory).reduce(
+				(sum, qty) => sum + qty,
+				0,
+			);
+			const availableSpace = targetNode.maxInventory - totalInventory;
+
+			if (availableSpace < quantity) {
 				console.log(
-					`Not enough ${product.name} in inventory. Have ${playerCurrentQuantity}, need ${quantity}`,
+					`Target node only has space for ${availableSpace} more items`,
 				);
 				return state;
 			}
 
-			// Check if target node has enough space
-			const targetCurrentQuantity = targetNode.inventory?.[productId] || 0;
-			const totalInventoryAfterSale =
-				Object.values(targetNode.inventory || {}).reduce(
-					(sum, qty) => sum + qty,
-					0,
-				) +
-				quantity -
-				targetCurrentQuantity;
+			// Calculate sale price (downsell price)
+			const totalPrice = product.downsellPrice * quantity;
 
-			if (totalInventoryAfterSale > targetNode.maxInventory) {
-				console.log(`Target downstream doesn't have enough inventory space`);
-				return state;
-			}
-
-			// Calculate revenue (discounted price for downstream sales)
-			const revenue = quantity * product.downsellPrice;
-
-			// Update player inventory
-			const updatedPlayerInventory = {
-				...state.player.inventory,
-				[productId]: playerCurrentQuantity - quantity,
-			};
+			// Update player inventory and money
+			const updatedPlayerInventory = { ...state.player.inventory };
+			updatedPlayerInventory[productId] = Math.max(
+				0,
+				(updatedPlayerInventory[productId] || 0) - quantity,
+			);
 
 			// Update target node inventory
-			const updatedNodes = state.pyramid.nodes.map((node) => {
-				if (node.id === targetNodeId) {
-					const nodeInventory = node.inventory || {};
+			const updatedNodes = [...state.pyramid.nodes];
+			const updatedTargetInventory = { ...targetInventory };
+			updatedTargetInventory[productId] = currentQuantity + quantity;
 
-					return {
-						...node,
-						inventory: {
-							...nodeInventory,
-							[productId]: (nodeInventory[productId] || 0) + quantity,
-						},
-						lastRestocked: Date.now(),
-					};
-				}
-				return node;
-			});
+			updatedNodes[targetNodeIndex] = {
+				...targetNode,
+				inventory: updatedTargetInventory,
+				lastUpdated: Date.now(),
+			};
 
 			console.log(
-				`Manually sold ${quantity} ${product.name} to downstream for $${revenue}`,
+				`[SELL] Sold ${quantity} ${product.name} to downstream node for $${totalPrice}`,
 			);
+
+			// Update player's total sales to downstream
+			const totalSalesDownstream = state.player.totalSalesDownstream + quantity;
 
 			return {
 				...state,
@@ -1741,9 +2136,10 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 				},
 				player: {
 					...state.player,
-					money: state.player.money + revenue,
 					inventory: updatedPlayerInventory,
-					totalSalesDownstream: state.player.totalSalesDownstream + quantity,
+					money: state.player.money + totalPrice,
+					energy: state.player.energy - 1,
+					totalSalesDownstream,
 				},
 				turns: state.turns + 1,
 			};
@@ -1752,88 +2148,80 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 		case "RESTOCK_DOWNSTREAM": {
 			const { targetNodeId, productId, quantity } = action;
 
-			// Find the product
-			const product = state.products.find((p) => p.id === productId);
-			if (!product) {
-				console.error(`Product ${productId} not found`);
+			// Check if player has enough energy
+			if (state.player.energy < NODE_RESTOCK_ENERGY_COST) {
+				console.log(
+					`Not enough energy to restock. Required: ${NODE_RESTOCK_ENERGY_COST}`,
+				);
 				return state;
 			}
 
 			// Find the target node
 			const targetNodeIndex = state.pyramid.nodes.findIndex(
-				(node) => node.id === targetNodeId && node.ownedByPlayer,
+				(node) => node.id === targetNodeId,
 			);
-
 			if (targetNodeIndex === -1) {
-				console.error(
-					`Target node ${targetNodeId} not found or not owned by player`,
-				);
+				console.log(`Target node ${targetNodeId} not found`);
 				return state;
 			}
 
 			const targetNode = state.pyramid.nodes[targetNodeIndex];
 
-			// Check if player has enough inventory
-			const playerCurrentQuantity = state.player.inventory[productId] || 0;
-			if (playerCurrentQuantity < quantity) {
+			// Check if target node is player-owned
+			if (!targetNode.ownedByPlayer) {
+				console.log("Can only restock player-owned nodes");
+				return state;
+			}
+
+			// Find the product
+			const product = state.products.find((p) => p.id === productId);
+			if (!product) {
+				console.log(`Product ${productId} not found`);
+				return state;
+			}
+
+			// Calculate total cost to restock
+			const totalCost = product.baseCost * quantity;
+
+			// Check if player has enough money
+			if (state.player.money < totalCost) {
+				console.log(`Not enough money to restock. Cost: $${totalCost}`);
+				return state;
+			}
+
+			// Check if target node has enough room in inventory
+			const targetInventory = targetNode.inventory || {};
+
+			// Calculate total inventory in target node
+			const totalInventory = Object.values(targetInventory).reduce(
+				(sum, qty) => sum + qty,
+				0,
+			);
+			const availableSpace = targetNode.maxInventory - totalInventory;
+
+			if (availableSpace < quantity) {
 				console.log(
-					`Not enough ${product.name} in inventory. Have ${playerCurrentQuantity}, need ${quantity}`,
+					`Target node only has space for ${availableSpace} more items`,
 				);
 				return state;
 			}
 
-			// Check if target node has enough space
-			const targetCurrentQuantity = targetNode.inventory?.[productId] || 0;
-			const totalInventoryAfterRestock =
-				Object.values(targetNode.inventory || {}).reduce(
-					(sum, qty) => sum + qty,
-					0,
-				) +
-				quantity -
-				targetCurrentQuantity;
+			// Update target node inventory
+			const updatedNodes = [...state.pyramid.nodes];
+			const updatedTargetInventory = { ...targetInventory };
 
-			if (totalInventoryAfterRestock > targetNode.maxInventory) {
-				console.log(`Target downstream doesn't have enough inventory space`);
-				return state;
-			}
+			updatedTargetInventory[productId] =
+				(updatedTargetInventory[productId] || 0) + quantity;
 
-			// Calculate cost for the downstream node (at wholesale price)
-			const restockCost = quantity * product.downsellPrice;
-
-			// Check if the node has enough money to pay for the restock
-			if (targetNode.money < restockCost) {
-				console.log(
-					`Downstream node doesn't have enough money (needs $${restockCost}), has $${targetNode.money}`,
-				);
-				return state;
-			}
-
-			// Update player inventory
-			const updatedPlayerInventory = {
-				...state.player.inventory,
-				[productId]: playerCurrentQuantity - quantity,
+			updatedNodes[targetNodeIndex] = {
+				...targetNode,
+				inventory: updatedTargetInventory,
+				lastRestocked: Date.now(),
+				lastUpdated: Date.now(),
 			};
 
-			// Update target node inventory and deduct money
-			const updatedNodes = state.pyramid.nodes.map((node) => {
-				if (node.id === targetNodeId) {
-					const nodeInventory = node.inventory || {};
-
-					return {
-						...node,
-						inventory: {
-							...nodeInventory,
-							[productId]: (nodeInventory[productId] || 0) + quantity,
-						},
-						money: node.money - restockCost, // Deduct money from the node
-						lastRestocked: Date.now(),
-					};
-				}
-				return node;
-			});
-
 			console.log(
-				`Restocked ${quantity} ${product.name} to downstream for $${restockCost}`,
+				`[RESTOCK] Restocked downstream node with ${quantity} ${product.name} for $${totalCost}`,
 			);
 
 			return {
@@ -1845,121 +2233,27 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 				},
 				player: {
 					...state.player,
-					money: state.player.money + restockCost, // Player gains the money
-					inventory: updatedPlayerInventory,
-					energy: state.player.energy - NODE_RESTOCK_ENERGY_COST, // Deduct energy
+					money: state.player.money - totalCost,
+					energy: state.player.energy - NODE_RESTOCK_ENERGY_COST,
 				},
 				turns: state.turns + 1,
 			};
-		}
-
-		case "REST": {
-			const { hours } = action;
-			const { gameDay, gameHour } = state;
-
-			// Calculate when rest will end
-			const restUntil = gameDay * HOURS_PER_DAY + gameHour + hours;
-
-			// Calculate a random energy recovery percentage between 60-100%
-			const recoveryPercentage = 0.6 + Math.random() * 0.4;
-
-			// Store the recovery percentage and energy gain for later use when rest is completed
-			console.log(
-				`Starting rest for ${hours} hours. Current energy: ${state.player.energy}, 
-				Recovery rate: ${Math.round(recoveryPercentage * 100)}%`,
-			);
-
-			// Set resting state (but don't advance time yet)
-			return {
-				...state,
-				player: {
-					...state.player,
-					isResting: true,
-					restUntil: restUntil,
-					// Store the recovery percentage for later use
-					recoveryPercentage: recoveryPercentage,
-				},
-				turns: state.turns + 1,
-			};
-		}
-
-		case "ADVANCE_TIME": {
-			let updatedState = advanceGameTime(state, action.hours);
-
-			// Check if the player is resting and if rest should be completed
-			if (state.player.isResting) {
-				const currentTotalHours =
-					state.gameDay * HOURS_PER_DAY + state.gameHour + action.hours;
-
-				// If current time has reached or passed the restUntil time
-				if (currentTotalHours >= state.player.restUntil) {
-					// Calculate how many hours the player actually rested
-					const hoursRested =
-						state.player.restUntil -
-						(state.gameDay * HOURS_PER_DAY + state.gameHour);
-
-					// Calculate energy gain based on rest duration and stored recovery percentage
-					const recoveryPercentage = state.player.recoveryPercentage || 0.8; // Default if not stored
-					const energyGain = Math.min(
-						MAX_ENERGY - state.player.energy,
-						Math.ceil(hoursRested * recoveryPercentage * 1.5), // Scaled to be more generous than previous system
-					);
-
-					console.log(
-						`Rest completed after ${hoursRested} hours. Energy gain: ${energyGain}, 
-						Recovery: ${Math.round(recoveryPercentage * 100)}%`,
-					);
-
-					// Update player energy and end resting state
-					updatedState = {
-						...updatedState,
-						player: {
-							...updatedState.player,
-							energy: Math.min(MAX_ENERGY, state.player.energy + energyGain),
-							isResting: false,
-							restUntil: 0,
-							recoveryPercentage: undefined,
-						},
-					};
-				}
-			} else {
-				// Check for game over condition if not resting
-				// Only trigger game over if they're completely out of options
-				if (
-					updatedState.player.energy <= 0 &&
-					updatedState.player.money < ENERGY_COST &&
-					!updatedState.gameOver
-				) {
-					// Set game over but not a winner
-					updatedState = {
-						...updatedState,
-						gameOver: true,
-						isWinner: false,
-					};
-					console.log("GAME OVER after time advance: Out of energy and money");
-				}
-			}
-
-			return updatedState;
 		}
 
 		case "RESET_GAME": {
+			console.log("[RESET] Game reset to initial state");
+			// Use our createInitialGameState function to generate a fresh game state
 			return createInitialGameState();
 		}
 
-		case "SET_GAME_OVER": {
-			return {
-				...state,
-				gameOver: true,
-				isWinner: action.isWinner,
-			};
-		}
+		// Handle other cases...
 
 		default:
 			return state;
 	}
 };
 
+// Export the hook for use in components
 export const useGameState = () => {
 	const [gameState, dispatch] = useReducer(
 		gameReducer,
@@ -1967,16 +2261,38 @@ export const useGameState = () => {
 		createInitialGameState,
 	);
 
-	// Auto-advance time every few seconds to simulate game time passing
-	useEffect(() => {
-		const timeInterval = setInterval(() => {
-			if (!gameState.gameOver) {
-				dispatch({ type: "ADVANCE_TIME", hours: 1 });
-			}
-		}, 1000); // Advance 1 hour every 1 second of real time
+	// Use a ref to track the current game state
+	const gameStateRef = React.useRef(gameState);
 
-		return () => clearInterval(timeInterval);
-	}, [gameState.gameOver]); // Only dependency is gameOver state to prevent constant re-renders
+	// Update the ref whenever gameState changes
+	React.useEffect(() => {
+		gameStateRef.current = gameState;
+	}, [gameState]);
+
+	// Auto-advance time every second - completely rewritten to fix timer issues
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	useEffect(() => {
+		console.log("Setting up game clock interval");
+
+		// Use a simple interval that dispatches the ADVANCE_TIME action every second
+		const interval = setInterval(() => {
+			// Use the ref to access the current game state
+			const currentGameState = gameStateRef.current;
+			if (!currentGameState.gameOver) {
+				console.log("Advancing time by 1 hour");
+				dispatch({ type: "ADVANCE_TIME", hours: 1 });
+			} else {
+				console.log("Game is over, not advancing time");
+			}
+		}, 1000);
+
+		// Important: This cleanup function will be called when the component unmounts
+		// or when any dependency changes
+		return () => {
+			console.log("Cleaning up game clock interval");
+			clearInterval(interval);
+		};
+	}, []); // Empty dependency array means this only runs once when component mounts
 
 	// Check if game over due to no more energy and no money to upgrade
 	useEffect(() => {
@@ -1998,7 +2314,7 @@ export const useGameState = () => {
 		gameState.player.money,
 		gameState.player.isResting,
 		gameState.gameOver,
-		dispatch,
+		// dispatch is intentionally omitted as it's stable across renders
 	]);
 
 	return { gameState, dispatch };

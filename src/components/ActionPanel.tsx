@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from "react";
 import styled from "styled-components";
 import { GameAction, PlayerStats, Product, MarketingEvent } from "../types";
+import { PRODUCT_BUY_ENERGY_COST } from "../hooks/useGameState";
 
-// Define constants here to match the ones in useGameState.ts
-const ENERGY_COST = 800;
-const MAX_ENERGY = 20;
-const PRODUCT_BUY_ENERGY_COST = 5;
-
-// Marketing event durations
+// Constants - update to match useGameState.ts
 const SOCIAL_MEDIA_DURATION = 24; // 24 hours (1 day)
 const HOME_PARTY_DURATION = 48; // 48 hours (2 days)
 const PUBLIC_WORKSHOP_DURATION = 168; // 168 hours (7 days)
+const SOCIAL_MEDIA_ENERGY = 2;
+const HOME_PARTY_ENERGY = 5;
+const PUBLIC_WORKSHOP_ENERGY = 8;
+
+// Success chances
+const SOCIAL_MEDIA_SUCCESS_CHANCE = 0.25; // 25% base chance for social media
+const HOME_PARTY_SUCCESS_CHANCE = 0.35; // 35% base chance for home party
+const WORKSHOP_SUCCESS_CHANCE = 0.75; // 75% base chance for workshop
+const WORKSHOP_EXTRA_RECRUIT_CHANCE = 0.1; // 10% chance for extra recruit in workshops
 
 // Investment constants
 const MIN_INVESTMENT = 50;
@@ -722,25 +727,17 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 
 	// Calculate network marketing success chances
 	const calculateMarketingChance = (intensity: string) => {
-		let baseChance = 0;
-
+		// Use the constants we defined at the top of the file
 		switch (intensity) {
 			case "light":
-				baseChance = 0.5 + playerStats.charisma * 0.05;
-				break;
+				return SOCIAL_MEDIA_SUCCESS_CHANCE;
 			case "medium":
-				baseChance = 0.35 + playerStats.charisma * 0.06;
-				break;
+				return HOME_PARTY_SUCCESS_CHANCE;
 			case "aggressive":
-				baseChance = 0.2 + playerStats.charisma * 0.07;
-				break;
+				return WORKSHOP_SUCCESS_CHANCE;
+			default:
+				return SOCIAL_MEDIA_SUCCESS_CHANCE;
 		}
-
-		// Add reputation bonus
-		baseChance += playerStats.reputation * 0.02;
-
-		// Cap at 85%
-		return Math.min(0.85, baseChance);
 	};
 
 	// Calculate max attempts for network marketing
@@ -831,6 +828,13 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 		const remainingHours = Math.max(0, restUntil - currentTotalHours);
 
 		return remainingHours > 0 ? `${remainingHours} hours` : "finishing soon";
+	};
+
+	// Calculate the max investment amount based on charisma and reputation
+	const calculateMaxInvestment = () => {
+		return Math.floor(
+			MIN_INVESTMENT + (playerStats.charisma + playerStats.reputation) * 50,
+		);
 	};
 
 	return (
@@ -934,12 +938,18 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 							<InvestmentSlider
 								type="range"
 								min={MIN_INVESTMENT}
-								max={Math.min(MAX_INVESTMENT, playerStats.money)}
+								max={Math.min(calculateMaxInvestment(), playerStats.money)}
 								value={investmentAmount}
 								onChange={(e) =>
 									setInvestmentAmount(Number.parseInt(e.target.value))
 								}
 							/>
+							<div
+								style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}
+							>
+								Max Investment: ${calculateMaxInvestment()} (based on Charisma +
+								Reputation)
+							</div>
 							<InvestmentBenefits>
 								{calculateInvestmentBenefits(investmentAmount).successBoost >
 									0 && (
@@ -1103,6 +1113,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 							<EventOptionDescription>
 								Host a professional seminar to attract serious business partners
 								to your network. Runs for {getEventDurationText("aggressive")}.
+								10% chance for bonus recruits!
 							</EventOptionDescription>
 							<MarketingDetails>
 								<MarketingDetailItem>

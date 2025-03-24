@@ -56,15 +56,58 @@ const GraphContainer = styled.div`
 
 const StatsOverlay = styled.div`
   background-color: rgba(255, 255, 255, 0.95);
-  padding: 10px 15px;
+  padding: 15px;
   border-radius: 8px;
   font-size: 13px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
   border: 1px solid #e0e0e0;
-  line-height: 1.7;
+  line-height: 1.5;
+  max-width: 200px;
+  max-height: 80vh;
+  overflow-y: auto;
   
   div {
-    margin-bottom: 3px;
+    margin-bottom: 2px;
+  }
+  
+  /* Heading styles */
+  .network-heading {
+    font-weight: bold;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid #e0e0e0;
+  }
+  
+  /* Network list styles */
+  .network-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  
+  /* Network item styles */
+  .network-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  
+  /* Color swatch styles */
+  .color-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  
+  /* Network name styles */
+  .network-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 `;
 
@@ -122,11 +165,21 @@ const PyramidFlowInner = ({
 			// Call original onNodeClick handler
 			onNodeClick(nodeId);
 
-			// Set popover position and show it
-			setPopoverPosition(position);
-			setShowPopover(true);
+			// Use viewport coordinates from reactflow instance for better positioning
+			const node = reactFlowInstance.getNode(nodeId);
+			if (node) {
+				// Get viewport coordinates based on node's center point
+				const { x, y } = reactFlowInstance.project({
+					x: node.position.x + (node.width || 0) / 2,
+					y: node.position.y,
+				});
+
+				// Set popover position and show it
+				setPopoverPosition({ x, y });
+				setShowPopover(true);
+			}
 		},
-		[onNodeClick],
+		[onNodeClick, reactFlowInstance],
 	);
 
 	// Convert pyramid nodes to React Flow nodes
@@ -154,10 +207,9 @@ const PyramidFlowInner = ({
 		});
 
 		// Setup pyramid dimensions - making pyramid larger and more centered
-		const pyramidWidth = 1400; // Increased base width (was 1200)
-		const levelHeight = 140; // Increased vertical spacing between levels (was 120)
-		const horizontalPadding = 100; // Reduced padding from edges
-		const topLevelWidth = 150; // Increased width for the top level (was 120)
+		const pyramidWidth = 1800; // Wide base width for better horizontal spacing
+		const levelHeight = 170; // Vertical spacing between levels
+		const topLevelWidth = 220; // Width for the top level
 
 		// Map to track position of nodes in each level
 		const levelPositions: Record<number, number> = {};
@@ -300,15 +352,86 @@ const PyramidFlowInner = ({
 
 				<Panel position="top-left">
 					<StatsOverlay>
-						<div>Total Nodes: {pyramid.nodes.length}</div>
 						<div>
-							Player Owned: {playerStats?.recruits + 1}{" "}
-							{/* +1 for player's own node */}
+							<strong>Nodes:</strong> {pyramid.nodes.length}
 						</div>
 						<div>
-							AI Owned: {pyramid.nodes.filter((n) => n.aiControlled).length}
+							<strong>Your Network:</strong> {playerStats?.recruits + 1}
 						</div>
-						<div>Levels: {Math.max(...pyramid.nodes.map((n) => n.level))}</div>
+						<div>
+							<strong>AI Networks:</strong>{" "}
+							{pyramid.nodes.filter((n) => n.aiControlled).length}
+						</div>
+
+						{/* Add network information */}
+						<div className="network-heading">Networks</div>
+						<div className="network-list">
+							<div className="network-item">
+								<div
+									className="color-swatch"
+									style={{ backgroundColor: "#4CAF50" }}
+								/>
+								<div className="network-name">You</div>
+							</div>
+							<div className="network-item">
+								<div
+									className="color-swatch"
+									style={{ backgroundColor: "#2196F3" }}
+								/>
+								<div className="network-name">Your Network</div>
+							</div>
+
+							{/* Display AI network colors */}
+							{Array.from(
+								new Set(
+									pyramid.nodes
+										.filter(
+											(n) =>
+												n.aiControlled &&
+												n.name &&
+												!n.name.includes("'s Recruit"),
+										)
+										.map((n) => n.name),
+								),
+							).map((networkName, index) => {
+								// Calculate the hash from name for a consistent color
+								let hashSum = 0;
+								if (networkName) {
+									for (let i = 0; i < networkName.length; i++) {
+										hashSum += networkName.charCodeAt(i);
+									}
+								}
+
+								// Get color from the same network colors array defined in CustomNode
+								const networkColors = [
+									"#9C27B0",
+									"#E91E63",
+									"#FF5722",
+									"#FF9800",
+									"#FFC107",
+									"#8BC34A",
+									"#009688",
+									"#03A9F4",
+									"#673AB7",
+									"#3F51B5",
+								];
+								const color = networkColors[hashSum % networkColors.length];
+
+								return (
+									<div key={`network-${index}`} className="network-item">
+										<div
+											className="color-swatch"
+											style={{ backgroundColor: color }}
+										/>
+										<div className="network-name">
+											{networkName?.length && networkName.length > 15
+												? networkName.substring(0, 15) + "..."
+												: networkName}
+										</div>
+									</div>
+								);
+							})}
+						</div>
 					</StatsOverlay>
 				</Panel>
 

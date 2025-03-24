@@ -246,6 +246,10 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 	const hasEnoughRecruits =
 		playerStats && playerStats.recruits >= requiredRecruits;
 
+	// Check if this node is a player's downstream node
+	// Only show sell/restock tab for player's direct downstream nodes
+	const isPlayerDownstreamNode = node.ownedByPlayer && !node.isPlayerPosition;
+
 	// Handle move up action
 	const handleMoveUp = () => {
 		if (
@@ -375,14 +379,16 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 					>
 						Inventory
 					</Tab>
-					{!node.isPlayerPosition && (
-						<Tab
-							active={activeTab === "sell"}
-							onClick={() => setActiveTab("sell")}
-						>
-							Sell/Restock
-						</Tab>
-					)}
+					{isPlayerDownstreamNode &&
+						playerStats &&
+						playerStats.currentNodeId && (
+							<Tab
+								active={activeTab === "sell"}
+								onClick={() => setActiveTab("sell")}
+							>
+								Sell/Restock
+							</Tab>
+						)}
 				</Tabs>
 			)}
 

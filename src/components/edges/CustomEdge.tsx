@@ -52,8 +52,39 @@ export const CustomEdge = memo(
 				return "#2196F3"; // Bold blue for player connections
 			}
 
+			// AI links should use the same color as the node for consistency
 			if (sourceNode.aiControlled && targetNode.aiControlled) {
-				return "#9C27B0"; // Purple for AI connections
+				// Check if they have the same owner (belong to same network)
+				const sourceOwner = sourceNode.name?.replace(/'s Recruit$/, "");
+				const targetOwner = targetNode.name?.replace(/'s Recruit$/, "");
+
+				if (sourceOwner === targetOwner) {
+					// Get consistent color hash (simplified version of what's in CustomNode)
+					let hashSum = 0;
+					if (sourceOwner) {
+						for (let i = 0; i < sourceOwner.length; i++) {
+							hashSum += sourceOwner.charCodeAt(i);
+						}
+					}
+
+					// Colors array must match the one in CustomNode.tsx
+					const networkColors = [
+						"#9C27B0",
+						"#E91E63",
+						"#FF5722",
+						"#FF9800",
+						"#FFC107",
+						"#8BC34A",
+						"#009688",
+						"#03A9F4",
+						"#673AB7",
+						"#3F51B5",
+					];
+					return networkColors[hashSum % networkColors.length];
+				} else {
+					// Different AI networks - use a neutral color
+					return "#9C27B0"; // Default purple for non-matched AI connections
+				}
 			}
 
 			if (
@@ -74,11 +105,21 @@ export const CustomEdge = memo(
 		const getEdgeWidth = (): number => {
 			// Player's links are thicker
 			if (sourceNode.ownedByPlayer && targetNode.ownedByPlayer) {
-				return 3;
+				return 2.5;
 			}
 
 			if (sourceNode.isPlayerPosition || targetNode.isPlayerPosition) {
-				return 3;
+				return 2.5;
+			}
+
+			// Same AI network connections slightly thicker
+			if (sourceNode.aiControlled && targetNode.aiControlled) {
+				const sourceOwner = sourceNode.name?.replace(/'s Recruit$/, "");
+				const targetOwner = targetNode.name?.replace(/'s Recruit$/, "");
+
+				if (sourceOwner === targetOwner) {
+					return 2;
+				}
 			}
 
 			return 1.5;
@@ -91,6 +132,16 @@ export const CustomEdge = memo(
 				return 0.9;
 			}
 
+			// Same AI network connections slightly more opaque
+			if (sourceNode.aiControlled && targetNode.aiControlled) {
+				const sourceOwner = sourceNode.name?.replace(/'s Recruit$/, "");
+				const targetOwner = targetNode.name?.replace(/'s Recruit$/, "");
+
+				if (sourceOwner === targetOwner) {
+					return 0.8;
+				}
+			}
+
 			return 0.6;
 		};
 
@@ -101,8 +152,16 @@ export const CustomEdge = memo(
 				return undefined;
 			}
 
+			// Same AI network connections solid
 			if (sourceNode.aiControlled && targetNode.aiControlled) {
-				return "5,3";
+				const sourceOwner = sourceNode.name?.replace(/'s Recruit$/, "");
+				const targetOwner = targetNode.name?.replace(/'s Recruit$/, "");
+
+				if (sourceOwner === targetOwner) {
+					return undefined;
+				}
+
+				return "5,3"; // Different AI networks have dashed lines
 			}
 
 			return undefined;
