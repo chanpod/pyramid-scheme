@@ -647,7 +647,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 	const [showEventDialog, setShowEventDialog] = useState(false);
 	const [flashMoney, setFlashMoney] = useState(false);
 	const [prevMoney, setPrevMoney] = useState(playerStats.money);
-	const [activeTab, setActiveTab] = useState<"cash" | "recruitment">("cash");
 	const [investmentAmount, setInvestmentAmount] = useState(MIN_INVESTMENT);
 
 	// Format the recruitment chance as a percentage
@@ -774,15 +773,15 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 		return { successBoost, additionalAttempts };
 	};
 
-	// Handle network marketing
+	// Handle network marketing - now only for recruitment
 	const handleNetworkMarketing = (
 		intensity: "light" | "medium" | "aggressive",
 	) => {
 		dispatch({
 			type: "NETWORK_MARKETING",
 			intensity,
-			purpose: activeTab,
-			investmentAmount: activeTab === "recruitment" ? investmentAmount : 0,
+			purpose: "recruitment",
+			investmentAmount: investmentAmount,
 		});
 		setShowEventDialog(false); // Close dialog after action
 		// Reset investment amount to minimum after sending
@@ -822,20 +821,6 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 		}
 	};
 
-	// Get event title based on purpose
-	const getEventTitle = (purpose: "cash" | "recruitment") => {
-		return purpose === "cash"
-			? "Host a Cash Marketing Event"
-			: "Host a Recruitment Event";
-	};
-
-	// Get event description based on purpose
-	const getEventDescription = (purpose: "cash" | "recruitment") => {
-		return purpose === "cash"
-			? "Marketing events require energy and run for a period of time. When completed, they'll generate cash based on your success rate."
-			: "Recruitment events run over time and help you find potential recruits for your network. Investing more money improves your chances and the number of potential recruits.";
-	};
-
 	return (
 		<PanelContainer>
 			<PanelTitle>
@@ -869,7 +854,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 						<EventTimeRemaining>
 							Time Remaining: {formatTimeRemaining(event.remainingHours)}
 						</EventTimeRemaining>
-						{event.purpose === "recruitment" && event.investmentAmount && (
+						{event.investmentAmount && (
 							<div
 								style={{
 									fontSize: "13px",
@@ -901,13 +886,13 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 			{/* Host an Event Button */}
 			<EventButton
 				onClick={() => setShowEventDialog(true)}
-				isEmergency={isLowOnResources()}
+				isEmergency={pendingRecruits.length === 0}
 				disabled={playerStats.isResting || isMarketingEventRunning()}
 			>
 				<EventIcon>📣</EventIcon>
-				{isLowOnResources()
-					? "Host a Marketing Event"
-					: "Host a Marketing Event"}
+				{pendingRecruits.length === 0
+					? "Find New Recruits (Critical)"
+					: "Host a Recruitment Event"}
 				{isMarketingEventRunning() && (
 					<StatusTag isPositive={false}>Event in Progress</StatusTag>
 				)}
@@ -917,118 +902,90 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 			{showEventDialog && (
 				<EventDialogOverlay onClick={() => setShowEventDialog(false)}>
 					<EventDialog onClick={(e) => e.stopPropagation()}>
-						<DialogTitle>{getEventTitle(activeTab)}</DialogTitle>
-
-						{/* Tab Selector */}
-						<TabContainer>
-							<Tab
-								active={activeTab === "cash"}
-								onClick={() => setActiveTab("cash")}
-							>
-								Cash Generation
-							</Tab>
-							<Tab
-								active={activeTab === "recruitment"}
-								onClick={() => setActiveTab("recruitment")}
-							>
-								Recruitment
-							</Tab>
-						</TabContainer>
+						<DialogTitle>Host a Recruitment Event</DialogTitle>
 
 						<DialogDescription>
-							{getEventDescription(activeTab)}
+							Recruitment events run over time and help you find potential
+							recruits for your network. Investing more money improves your
+							chances and the number of potential recruits you can attract. Each
+							event type has different duration and effectiveness.
 						</DialogDescription>
 
 						{/* Investment slider for recruitment events */}
-						{activeTab === "recruitment" && (
-							<InvestmentContainer>
-								<InvestmentLabel>
-									Investment Amount
-									<InvestmentAmount>${investmentAmount}</InvestmentAmount>
-								</InvestmentLabel>
-								<InvestmentSlider
-									type="range"
-									min={MIN_INVESTMENT}
-									max={Math.min(MAX_INVESTMENT, playerStats.money)}
-									value={investmentAmount}
-									onChange={(e) =>
-										setInvestmentAmount(parseInt(e.target.value))
-									}
-								/>
-								<InvestmentBenefits>
-									{calculateInvestmentBenefits(investmentAmount).successBoost >
-										0 && (
-										<Benefit>
-											<BenefitIcon>✅</BenefitIcon>+
-											{calculateInvestmentBenefits(
-												investmentAmount,
-											).successBoost.toFixed(1)}
-											% recruitment success chance
-										</Benefit>
-									)}
-									{calculateInvestmentBenefits(investmentAmount)
-										.additionalAttempts > 0 && (
-										<Benefit>
-											<BenefitIcon>✅</BenefitIcon>
-											{
-												calculateInvestmentBenefits(investmentAmount)
-													.additionalAttempts
-											}{" "}
-											additional recruitment attempts
-										</Benefit>
-									)}
-								</InvestmentBenefits>
-							</InvestmentContainer>
-						)}
+						<InvestmentContainer>
+							<InvestmentLabel>
+								Investment Amount
+								<InvestmentAmount>${investmentAmount}</InvestmentAmount>
+							</InvestmentLabel>
+							<InvestmentSlider
+								type="range"
+								min={MIN_INVESTMENT}
+								max={Math.min(MAX_INVESTMENT, playerStats.money)}
+								value={investmentAmount}
+								onChange={(e) =>
+									setInvestmentAmount(Number.parseInt(e.target.value))
+								}
+							/>
+							<InvestmentBenefits>
+								{calculateInvestmentBenefits(investmentAmount).successBoost >
+									0 && (
+									<Benefit>
+										<BenefitIcon>✅</BenefitIcon>+
+										{calculateInvestmentBenefits(
+											investmentAmount,
+										).successBoost.toFixed(1)}
+										% recruitment success chance
+									</Benefit>
+								)}
+								{calculateInvestmentBenefits(investmentAmount)
+									.additionalAttempts > 0 && (
+									<Benefit>
+										<BenefitIcon>✅</BenefitIcon>
+										{
+											calculateInvestmentBenefits(investmentAmount)
+												.additionalAttempts
+										}{" "}
+										additional recruitment attempts
+									</Benefit>
+								)}
+							</InvestmentBenefits>
+						</InvestmentContainer>
 
 						<EventOption onClick={() => handleNetworkMarketing("light")}>
 							<EventOptionTitle>
 								<ActionIcon>📱</ActionIcon>
-								{activeTab === "cash"
-									? "Social Media Blitz"
-									: "Social Media Recruitment"}
+								Social Media Recruitment
 								{playerStats.energy < 2 && (
 									<StatusTag isPositive={false}>No Energy</StatusTag>
 								)}
-								{activeTab === "recruitment" &&
-									playerStats.money < investmentAmount && (
-										<StatusTag isPositive={false}>
-											Can't Afford Investment
-										</StatusTag>
-									)}
+								{playerStats.money < investmentAmount && (
+									<StatusTag isPositive={false}>
+										Can't Afford Investment
+									</StatusTag>
+								)}
 							</EventOptionTitle>
 							<EventOptionDescription>
-								{activeTab === "cash"
-									? "Create targeted posts across all your social media platforms."
-									: "Find potential recruits through targeted social media posts."}
+								Find potential recruits through targeted social media posts.
 								Runs for {getEventDurationText("light")}.
 							</EventOptionDescription>
 							<MarketingDetails>
 								<MarketingDetailItem>
 									<DetailLabel>Energy Cost:</DetailLabel> 2
 								</MarketingDetailItem>
-								{activeTab === "recruitment" && (
-									<MarketingDetailItem>
-										<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
-									</MarketingDetailItem>
-								)}
+								<MarketingDetailItem>
+									<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
+								</MarketingDetailItem>
 								<MarketingDetailItem>
 									<DetailLabel>Duration:</DetailLabel>{" "}
 									{getEventDurationText("light")}
 								</MarketingDetailItem>
-								{activeTab === "cash" ? (
-									<MarketingDetailItem>
-										<DetailLabel>Reward Per Success:</DetailLabel> $24-36
-									</MarketingDetailItem>
-								) : (
-									<MarketingDetailItem>
-										<DetailLabel>Potential Recruits:</DetailLabel> 1-2
-									</MarketingDetailItem>
-								)}
+								<MarketingDetailItem>
+									<DetailLabel>Potential Recruits:</DetailLabel> 1-2
+								</MarketingDetailItem>
 								<MarketingDetailItem>
 									<DetailLabel>Success Chance:</DetailLabel>{" "}
 									{Math.round(calculateMarketingChance("light") * 100)}%
-									{activeTab === "recruitment" && investmentAmount > 0 && (
+									{investmentAmount > 0 && (
 										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
 											+
 											{calculateInvestmentBenefits(
@@ -1041,17 +998,16 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 								<MarketingDetailItem>
 									<DetailLabel>Attempts:</DetailLabel>{" "}
 									{calculateMaxAttempts("light")}
-									{activeTab === "recruitment" &&
-										calculateInvestmentBenefits(investmentAmount)
-											.additionalAttempts > 0 && (
-											<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
-												+
-												{
-													calculateInvestmentBenefits(investmentAmount)
-														.additionalAttempts
-												}
-											</span>
-										)}
+									{calculateInvestmentBenefits(investmentAmount)
+										.additionalAttempts > 0 && (
+										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+											+
+											{
+												calculateInvestmentBenefits(investmentAmount)
+													.additionalAttempts
+											}
+										</span>
+									)}
 								</MarketingDetailItem>
 							</MarketingDetails>
 						</EventOption>
@@ -1059,49 +1015,38 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 						<EventOption onClick={() => handleNetworkMarketing("medium")}>
 							<EventOptionTitle>
 								<ActionIcon>🏠</ActionIcon>
-								{activeTab === "cash" ? "Home Party" : "Home Recruitment Party"}
+								Home Recruitment Party
 								{playerStats.energy < 5 && (
 									<StatusTag isPositive={false}>No Energy</StatusTag>
 								)}
-								{activeTab === "recruitment" &&
-									playerStats.money < investmentAmount && (
-										<StatusTag isPositive={false}>
-											Can't Afford Investment
-										</StatusTag>
-									)}
+								{playerStats.money < investmentAmount && (
+									<StatusTag isPositive={false}>
+										Can't Afford Investment
+									</StatusTag>
+								)}
 							</EventOptionTitle>
 							<EventOptionDescription>
-								{activeTab === "cash"
-									? "Host a product demonstration for friends and family at your home."
-									: "Host a recruitment party at your home for potential business partners."}
-								Runs for {getEventDurationText("medium")}.
+								Host a recruitment party at your home for potential business
+								partners. Runs for {getEventDurationText("medium")}.
 							</EventOptionDescription>
 							<MarketingDetails>
 								<MarketingDetailItem>
 									<DetailLabel>Energy Cost:</DetailLabel> 5
 								</MarketingDetailItem>
-								{activeTab === "recruitment" && (
-									<MarketingDetailItem>
-										<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
-									</MarketingDetailItem>
-								)}
+								<MarketingDetailItem>
+									<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
+								</MarketingDetailItem>
 								<MarketingDetailItem>
 									<DetailLabel>Duration:</DetailLabel>{" "}
 									{getEventDurationText("medium")}
 								</MarketingDetailItem>
-								{activeTab === "cash" ? (
-									<MarketingDetailItem>
-										<DetailLabel>Reward Per Success:</DetailLabel> $48-72
-									</MarketingDetailItem>
-								) : (
-									<MarketingDetailItem>
-										<DetailLabel>Potential Recruits:</DetailLabel> 1-3
-									</MarketingDetailItem>
-								)}
+								<MarketingDetailItem>
+									<DetailLabel>Potential Recruits:</DetailLabel> 1-3
+								</MarketingDetailItem>
 								<MarketingDetailItem>
 									<DetailLabel>Success Chance:</DetailLabel>{" "}
 									{Math.round(calculateMarketingChance("medium") * 100)}%
-									{activeTab === "recruitment" && investmentAmount > 0 && (
+									{investmentAmount > 0 && (
 										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
 											+
 											{calculateInvestmentBenefits(
@@ -1114,17 +1059,16 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 								<MarketingDetailItem>
 									<DetailLabel>Attempts:</DetailLabel>{" "}
 									{calculateMaxAttempts("medium")}
-									{activeTab === "recruitment" &&
-										calculateInvestmentBenefits(investmentAmount)
-											.additionalAttempts > 0 && (
-											<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
-												+
-												{
-													calculateInvestmentBenefits(investmentAmount)
-														.additionalAttempts
-												}
-											</span>
-										)}
+									{calculateInvestmentBenefits(investmentAmount)
+										.additionalAttempts > 0 && (
+										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+											+
+											{
+												calculateInvestmentBenefits(investmentAmount)
+													.additionalAttempts
+											}
+										</span>
+									)}
 								</MarketingDetailItem>
 							</MarketingDetails>
 						</EventOption>
@@ -1132,51 +1076,38 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 						<EventOption onClick={() => handleNetworkMarketing("aggressive")}>
 							<EventOptionTitle>
 								<ActionIcon>🎪</ActionIcon>
-								{activeTab === "cash"
-									? "Public Workshop"
-									: "Recruitment Seminar"}
+								Recruitment Seminar
 								{playerStats.energy < 8 && (
 									<StatusTag isPositive={false}>No Energy</StatusTag>
 								)}
-								{activeTab === "recruitment" &&
-									playerStats.money < investmentAmount && (
-										<StatusTag isPositive={false}>
-											Can't Afford Investment
-										</StatusTag>
-									)}
+								{playerStats.money < investmentAmount && (
+									<StatusTag isPositive={false}>
+										Can't Afford Investment
+									</StatusTag>
+								)}
 							</EventOptionTitle>
 							<EventOptionDescription>
-								{activeTab === "cash"
-									? "Rent a space for a large promotional event with extensive preparation."
-									: "Host a professional seminar to attract serious business partners to your network."}
-								Runs for {getEventDurationText("aggressive")}.
+								Host a professional seminar to attract serious business partners
+								to your network. Runs for {getEventDurationText("aggressive")}.
 							</EventOptionDescription>
 							<MarketingDetails>
 								<MarketingDetailItem>
 									<DetailLabel>Energy Cost:</DetailLabel> 8
 								</MarketingDetailItem>
-								{activeTab === "recruitment" && (
-									<MarketingDetailItem>
-										<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
-									</MarketingDetailItem>
-								)}
+								<MarketingDetailItem>
+									<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
+								</MarketingDetailItem>
 								<MarketingDetailItem>
 									<DetailLabel>Duration:</DetailLabel>{" "}
 									{getEventDurationText("aggressive")}
 								</MarketingDetailItem>
-								{activeTab === "cash" ? (
-									<MarketingDetailItem>
-										<DetailLabel>Reward Per Success:</DetailLabel> $80-120
-									</MarketingDetailItem>
-								) : (
-									<MarketingDetailItem>
-										<DetailLabel>Potential Recruits:</DetailLabel> 2-4
-									</MarketingDetailItem>
-								)}
+								<MarketingDetailItem>
+									<DetailLabel>Potential Recruits:</DetailLabel> 2-4
+								</MarketingDetailItem>
 								<MarketingDetailItem>
 									<DetailLabel>Success Chance:</DetailLabel>{" "}
 									{Math.round(calculateMarketingChance("aggressive") * 100)}%
-									{activeTab === "recruitment" && investmentAmount > 0 && (
+									{investmentAmount > 0 && (
 										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
 											+
 											{calculateInvestmentBenefits(
@@ -1189,17 +1120,16 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 								<MarketingDetailItem>
 									<DetailLabel>Attempts:</DetailLabel>{" "}
 									{calculateMaxAttempts("aggressive")}
-									{activeTab === "recruitment" &&
-										calculateInvestmentBenefits(investmentAmount)
-											.additionalAttempts > 0 && (
-											<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
-												+
-												{
-													calculateInvestmentBenefits(investmentAmount)
-														.additionalAttempts
-												}
-											</span>
-										)}
+									{calculateInvestmentBenefits(investmentAmount)
+										.additionalAttempts > 0 && (
+										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+											+
+											{
+												calculateInvestmentBenefits(investmentAmount)
+													.additionalAttempts
+											}
+										</span>
+									)}
 								</MarketingDetailItem>
 							</MarketingDetails>
 						</EventOption>

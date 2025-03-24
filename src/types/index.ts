@@ -42,7 +42,7 @@ export interface Product {
 export interface MarketingEvent {
 	id: string;
 	type: "social-media" | "home-party" | "workshop";
-	purpose: "cash" | "recruitment"; // Whether this event generates cash or recruits
+	purpose: "recruitment"; // Only used for recruitment now
 	name: string;
 	remainingHours: number;
 	totalHours: number;

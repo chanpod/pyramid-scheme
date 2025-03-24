@@ -9,7 +9,7 @@ import {
 } from "../utils/pyramidGenerator";
 
 // Constants for game mechanics
-const HOURS_PER_DAY = 3;
+const HOURS_PER_DAY = 24;
 const MAX_ENERGY = 20;
 const REST_ENERGY_PER_HOUR = 0.5; // Energy gained per hour of rest
 const ENERGY_COST = 800; // Cost to buy energy
@@ -1237,48 +1237,40 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 	}
 
 	// Process active marketing events
-	const updatedMarketingEvents = state.marketingEvents.map((event) => {
-		// Reduce remaining hours
-		const remainingHours = Math.max(0, event.remainingHours - hours);
+	if (state.marketingEvents.length > 0) {
+		const activeEvents = [...state.marketingEvents];
+		const completedEvents = [];
+		const updatedEvents = [];
 
-		// If event just completed, process results
-		if (event.remainingHours > 0 && remainingHours === 0) {
-			if (event.purpose === "cash") {
-				// Generate results for completed cash marketing event
-				const successAttempts = generateMarketingResults(event);
+		for (let event of activeEvents) {
+			// Decrease remaining hours
+			event = {
+				...event,
+				remainingHours: event.remainingHours - hours,
+			};
 
-				// Calculate total reward
-				let totalReward = 0;
-				for (let i = 0; i < successAttempts; i++) {
-					const rewardAmount = Math.floor(
-						event.baseReward.min +
-							Math.random() * (event.baseReward.max - event.baseReward.min),
-					);
-					totalReward += rewardAmount;
-				}
-
-				// Apply reward to player
-				updatedState.player.money += totalReward;
-
-				console.log(
-					`Marketing event "${event.name}" completed with ${successAttempts} successful attempts, earning $${totalReward}`,
-				);
-			} else if (event.purpose === "recruitment") {
-				// Process recruitment marketing event
-				processRecruitmentEvent(updatedState, event);
+			// Check if event is completed
+			if (event.remainingHours <= 0) {
+				completedEvents.push(event);
+			} else {
+				updatedEvents.push(event);
 			}
 		}
 
-		return {
-			...event,
-			remainingHours,
-		};
-	});
+		// Process completed events
+		if (completedEvents.length > 0) {
+			for (const event of completedEvents) {
+				// For recruitment events, generate potential recruits
+				updatedState = processRecruitmentEvent(updatedState, event);
+			}
+		}
 
-	// Filter out completed events
-	updatedState.marketingEvents = updatedMarketingEvents.filter(
-		(event) => event.remainingHours > 0,
-	);
+		// Update remaining events
+		updatedState = {
+			...updatedState,
+			marketingEvents: updatedEvents,
+		};
+	}
 
 	// Return updated state with new time
 	return {
@@ -1399,7 +1391,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 		case "NETWORK_MARKETING": {
 			const {
 				intensity,
-				purpose = "cash",
+				purpose = "recruitment", // Default to recruitment now
 				eventName,
 				investmentAmount = 0,
 			} = action;
@@ -1417,33 +1409,22 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 					duration = SOCIAL_MEDIA_DURATION;
 					energyCost = SOCIAL_MEDIA_ENERGY;
 					eventType = "social-media";
-					baseReward =
-						purpose === "cash" ? { min: 24, max: 36 } : { min: 1, max: 1 };
-					displayName =
-						eventName ||
-						(purpose === "cash"
-							? "Social Media Blitz"
-							: "Social Media Recruitment");
+					baseReward = { min: 1, max: 1 };
+					displayName = eventName || "Social Media Recruitment";
 					break;
 				case "medium":
 					duration = HOME_PARTY_DURATION;
 					energyCost = HOME_PARTY_ENERGY;
 					eventType = "home-party";
-					baseReward =
-						purpose === "cash" ? { min: 48, max: 72 } : { min: 1, max: 2 };
-					displayName =
-						eventName ||
-						(purpose === "cash" ? "Home Party" : "Home Recruitment Party");
+					baseReward = { min: 1, max: 2 };
+					displayName = eventName || "Home Recruitment Party";
 					break;
 				case "aggressive":
 					duration = PUBLIC_WORKSHOP_DURATION;
 					eventType = "workshop";
 					energyCost = PUBLIC_WORKSHOP_ENERGY;
-					baseReward =
-						purpose === "cash" ? { min: 80, max: 120 } : { min: 2, max: 4 };
-					displayName =
-						eventName ||
-						(purpose === "cash" ? "Public Workshop" : "Recruitment Seminar");
+					baseReward = { min: 2, max: 4 };
+					displayName = eventName || "Recruitment Seminar";
 					break;
 				default:
 					return state; // Invalid intensity
@@ -1488,7 +1469,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			const newEvent: MarketingEvent = {
 				id: `marketing-${Date.now()}`,
 				type: eventType,
-				purpose: purpose,
+				purpose: "recruitment",
 				name: displayName,
 				remainingHours: duration,
 				totalHours: duration,
@@ -1499,7 +1480,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			};
 
 			console.log(
-				`Started ${displayName} ${purpose} event for ${duration} hours`,
+				`Started ${displayName} recruitment event for ${duration} hours`,
 			);
 			if (investmentAmount > 0) {
 				console.log(`Additional investment: $${investmentAmount}`);
@@ -1878,6 +1859,110 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 					money: state.player.money + revenue,
 					inventory: updatedPlayerInventory,
 					totalSalesDownstream: state.player.totalSalesDownstream + quantity,
+				},
+				turns: state.turns + 1,
+			};
+		}
+
+		case "RESTOCK_DOWNSTREAM": {
+			const { targetNodeId, productId, quantity } = action;
+
+			// Find the product
+			const product = state.products.find((p) => p.id === productId);
+			if (!product) {
+				console.error(`Product ${productId} not found`);
+				return state;
+			}
+
+			// Find the target node
+			const targetNodeIndex = state.pyramid.nodes.findIndex(
+				(node) => node.id === targetNodeId && node.ownedByPlayer,
+			);
+
+			if (targetNodeIndex === -1) {
+				console.error(
+					`Target node ${targetNodeId} not found or not owned by player`,
+				);
+				return state;
+			}
+
+			const targetNode = state.pyramid.nodes[targetNodeIndex];
+
+			// Check if player has enough inventory
+			const playerCurrentQuantity = state.player.inventory[productId] || 0;
+			if (playerCurrentQuantity < quantity) {
+				console.log(
+					`Not enough ${product.name} in inventory. Have ${playerCurrentQuantity}, need ${quantity}`,
+				);
+				return state;
+			}
+
+			// Check if target node has enough space
+			const targetCurrentQuantity = targetNode.inventory?.[productId] || 0;
+			const totalInventoryAfterRestock =
+				Object.values(targetNode.inventory || {}).reduce(
+					(sum, qty) => sum + qty,
+					0,
+				) +
+				quantity -
+				targetCurrentQuantity;
+
+			if (totalInventoryAfterRestock > targetNode.maxInventory) {
+				console.log(`Target downstream doesn't have enough inventory space`);
+				return state;
+			}
+
+			// Calculate cost for the downstream node (at wholesale price)
+			const restockCost = quantity * product.downsellPrice;
+
+			// Check if the node has enough money to pay for the restock
+			if (targetNode.money < restockCost) {
+				console.log(
+					`Downstream node doesn't have enough money (needs $${restockCost}), has $${targetNode.money}`,
+				);
+				return state;
+			}
+
+			// Update player inventory
+			const updatedPlayerInventory = {
+				...state.player.inventory,
+				[productId]: playerCurrentQuantity - quantity,
+			};
+
+			// Update target node inventory and deduct money
+			const updatedNodes = state.pyramid.nodes.map((node) => {
+				if (node.id === targetNodeId) {
+					const nodeInventory = node.inventory || {};
+
+					return {
+						...node,
+						inventory: {
+							...nodeInventory,
+							[productId]: (nodeInventory[productId] || 0) + quantity,
+						},
+						money: node.money - restockCost, // Deduct money from the node
+						lastRestocked: Date.now(),
+					};
+				}
+				return node;
+			});
+
+			console.log(
+				`Restocked ${quantity} ${product.name} to downstream for $${restockCost}`,
+			);
+
+			return {
+				...state,
+				pyramid: {
+					...state.pyramid,
+					nodes: updatedNodes,
+					version: state.pyramid.version + 1,
+				},
+				player: {
+					...state.player,
+					money: state.player.money + restockCost, // Player gains the money
+					inventory: updatedPlayerInventory,
+					energy: state.player.energy - NODE_RESTOCK_ENERGY_COST, // Deduct energy
 				},
 				turns: state.turns + 1,
 			};
