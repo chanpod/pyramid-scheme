@@ -286,9 +286,9 @@ const PyramidGraph: React.FC<PyramidGraphProps> = memo(
 			// Find all visible nodes (all nodes except potential recruits)
 			for (const node of pyramid.nodes) {
 				// Skip potential recruits entirely - they're not part of the visible network yet
-				if (node.isPotentialRecruit) {
-					continue;
-				}
+				// if (node.isPotentialRecruit) {
+				// 	continue;
+				// }
 
 				// Include all other nodes in the visualization
 				visibleNodeIds.add(node.id);
@@ -646,10 +646,6 @@ const PyramidGraph: React.FC<PyramidGraphProps> = memo(
 					</div>
 					<div>
 						AI Owned: {pyramid.nodes.filter((n) => n.aiControlled).length}
-					</div>
-					<div>
-						Potential Recruits:{" "}
-						{pyramid.nodes.filter((n) => n.isPotentialRecruit).length}
 					</div>
 					<div>Levels: {Math.max(...pyramid.nodes.map((n) => n.level))}</div>
 				</StatsOverlay>

@@ -165,7 +165,11 @@ const formatTime = (hour: number) => {
 function App() {
 	const { gameState, dispatch } = useGameState();
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-	const [showTutorial, setShowTutorial] = useState(true);
+	const [showTutorial, setShowTutorial] = useState(() => {
+		// Check localStorage for tutorial preference
+		const hasReadTutorial = localStorage.getItem("hasReadTutorial") === "true";
+		return !hasReadTutorial; // Only show if the user hasn't read it before
+	});
 	const [pulseClock, setPulseClock] = useState(false);
 	const prevHourRef = useRef(gameState.gameHour);
 
@@ -183,13 +187,10 @@ function App() {
 		? getNodesBelow(gameState.pyramid, playerNode.id)
 		: [];
 
-	const canMoveUp = selectedNode
-		? nodesAbove.some((node) => node.id === selectedNode.id)
-		: false;
-
-	const canRecruit = selectedNode
-		? nodesBelow.some((node) => node.id === selectedNode.id)
-		: false;
+	const canMoveUp =
+		selectedNode &&
+		selectedNode.id &&
+		nodesAbove.some((node) => node.id === selectedNode.id);
 
 	const handleNodeClick = (nodeId: string) => {
 		setSelectedNodeId(nodeId);
@@ -204,6 +205,12 @@ function App() {
 			return () => clearTimeout(timer);
 		}
 	}, [gameState.gameHour]);
+
+	// Save tutorial preference when closed
+	const handleCloseTutorial = () => {
+		localStorage.setItem("hasReadTutorial", "true");
+		setShowTutorial(false);
+	};
 
 	return (
 		<AppContainer>
@@ -240,9 +247,8 @@ function App() {
 					<PyramidFlowGraph
 						pyramid={gameState.pyramid}
 						onNodeClick={handleNodeClick}
-						selectedNodeId={selectedNodeId || undefined}
+						selectedNodeId={selectedNodeId}
 						canMoveUp={canMoveUp}
-						canRecruit={canRecruit}
 						playerStats={gameState.player}
 						dispatch={dispatch}
 						products={gameState.products}
@@ -255,7 +261,6 @@ function App() {
 						playerStats={gameState.player}
 						gameDay={gameState.gameDay}
 						gameHour={gameState.gameHour}
-						pendingRecruits={gameState.pendingRecruits}
 						products={gameState.products}
 						marketingEvents={gameState.marketingEvents}
 					/>
@@ -271,7 +276,7 @@ function App() {
 				/>
 			)}
 
-			{showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
+			{showTutorial && <Tutorial onClose={handleCloseTutorial} />}
 
 			<Footer>
 				Pyramid Scheme: The Game - Build your network and climb to success!

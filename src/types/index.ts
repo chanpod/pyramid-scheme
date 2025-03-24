@@ -11,7 +11,7 @@ export interface PyramidNode {
 	aiControlled?: boolean; // Flag to indicate if this node is controlled by AI
 	aiStrategy?: string; // Strategy type for AI players
 	lastUpdated?: number; // Timestamp for tracking changes
-	isPotentialRecruit?: boolean; // Flag to indicate if this node is a potential recruit not yet in the pyramid
+	isPotentialRecruit?: boolean; // DEPRECATED - Kept for backwards compatibility but no longer used
 	inventory?: { [productId: string]: number }; // Product inventory counts
 	maxInventory: number; // Maximum inventory capacity
 	lastRestocked?: number; // Timestamp for when this node was last restocked
@@ -78,14 +78,14 @@ export interface GameState {
 	gameHour: number;
 	gameOver: boolean;
 	isWinner: boolean;
-	pendingRecruits: { nodeId: string; chance: number }[];
+	// pendingRecruits: { nodeId: string; chance: number }[]; // Removed - recruitment now only via marketing events
 	lastDailyEnergyBonus: number; // Timestamp of when the last daily energy bonus was given
 	products: Product[]; // Available products in the game
 	marketingEvents: MarketingEvent[]; // Active marketing events
 }
 
 export type GameAction =
-	| { type: "RECRUIT"; targetNodeId: string }
+	// Removed RECRUIT action - recruitment now only via marketing events
 	| { type: "MOVE_UP"; targetNodeId: string }
 	| { type: "COLLECT_MONEY" }
 	| { type: "UPGRADE_CHARISMA" }

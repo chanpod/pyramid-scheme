@@ -344,13 +344,6 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 				</StatItem>
 
 				<StatItem>
-					<StatLabel>
-						<StatIcon>🎯</StatIcon>Potential Recruits
-					</StatLabel>
-					<StatValue>{potentialRecruits}</StatValue>
-				</StatItem>
-
-				<StatItem>
 					<StatLabel style={{ marginBottom: "8px" }}>
 						<div
 							style={{ display: "flex", alignItems: "center", width: "100%" }}
@@ -446,7 +439,7 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 
 				<StatItem>
 					<StatLabel>
-						<StatIcon>📊</StatIcon>Reputation
+						<StatIcon>✨</StatIcon>Reputation
 					</StatLabel>
 					<StatValue>{stats.reputation}</StatValue>
 				</StatItem>

@@ -7,7 +7,6 @@ interface NodePopoverProps {
 	position: { x: number; y: number };
 	onClose: () => void;
 	canMoveUp?: boolean;
-	canRecruit?: boolean;
 	playerStats?: any;
 	dispatch?: any;
 	products?: Product[];
@@ -219,7 +218,6 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 	position,
 	onClose,
 	canMoveUp,
-	canRecruit,
 	playerStats,
 	dispatch,
 	products = [],
@@ -233,17 +231,13 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 		if (node.isPlayerPosition) return "Your Position";
 		if (node.ownedByPlayer) return "Your Network Member";
 		if (node.aiControlled) return "Competitor's Member";
-		return "Potential Recruit";
+		return "Unaffiliated Person";
 	};
 
 	// Calculate required recruits to move up
 	const requiredRecruits = canMoveUp ? Math.ceil((7 - node.level) * 1.5) : 0;
 
-	// Check if player can afford to recruit
-	const canAffordRecruit = playerStats && playerStats.energy >= 2;
-
 	// Check if player has enough energy
-	const hasEnergyToRecruit = playerStats && playerStats.energy >= 2;
 	const hasEnergyToMoveUp = playerStats && playerStats.energy >= 3;
 	const hasEnergyToSell = playerStats && playerStats.energy >= 1;
 	const hasEnergyToRestock = playerStats && playerStats.energy >= 1;
@@ -251,17 +245,6 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 	// Check if player has enough recruits to move up
 	const hasEnoughRecruits =
 		playerStats && playerStats.recruits >= requiredRecruits;
-
-	// Handle recruitment action
-	const handleRecruit = () => {
-		if (dispatch && node && canRecruit && hasEnergyToRecruit) {
-			dispatch({
-				type: "RECRUIT",
-				targetNodeId: node.id,
-			});
-			onClose();
-		}
-	};
 
 	// Handle move up action
 	const handleMoveUp = () => {
@@ -439,23 +422,6 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 							</Value>
 						</InfoRow>
 					)}
-
-					{/* Actions based on node state */}
-					{canRecruit &&
-						!node.ownedByPlayer &&
-						!node.aiControlled &&
-						dispatch && (
-							<ActionButton
-								primary
-								disabled={!hasEnergyToRecruit}
-								onClick={handleRecruit}
-							>
-								<ActionIcon>👥</ActionIcon> Recruit This Person
-								{!hasEnergyToRecruit && (
-									<StatusTag isPositive={false}>No Energy</StatusTag>
-								)}
-							</ActionButton>
-						)}
 
 					{canMoveUp && dispatch && (
 						<ActionButton

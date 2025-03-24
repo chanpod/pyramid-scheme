@@ -38,16 +38,17 @@ const INVESTMENT_ATTEMPTS_MULTIPLIER = 0.002; // 0.2% per dollar invested
 
 // Initial player stats
 const initialPlayerStats: PlayerStats = {
-	money: 500,
+	money: 1000,
 	recruits: 0,
-	level: 6, // Starting at level 6 (near the bottom)
+	level: 5, // Start at level 5 of the pyramid
 	currentNodeId: "",
-	recruitingPower: 1,
 	charisma: 1,
-	energy: 10,
+	recruitingPower: 1,
+	energy: MAX_ENERGY, // Start with full energy
 	reputation: 1,
 	isResting: false,
 	restUntil: 0,
+	recoveryPercentage: undefined,
 	inventory: {},
 	totalSalesRandom: 0,
 	totalSalesDownstream: 0,
@@ -81,74 +82,247 @@ const productDefinitions = [
 	},
 ];
 
-// Create initial game state
-const createInitialGameState = (): GameState => {
-	const pyramid = generatePyramid(7, 6); // 7 levels total, player starts at level 6
-	const playerNode = pyramid.nodes.find((node) => node.isPlayerPosition);
+// Helper function to propagate ownership down the network
+const propagateOwnership = (
+	pyramid: PyramidGraph,
+	startNodeId: string,
+	isPlayer: boolean = true,
+): PyramidGraph => {
+	const updatedNodes = [...pyramid.nodes];
+	const processed = new Set<string>();
 
-	// For debugging, log the pyramid structure
-	console.log(
-		"Initial pyramid structure:",
-		`Total nodes: ${pyramid.nodes.length}`,
-		`Player node: ${playerNode?.id} at level ${playerNode?.level}`,
-	);
+	// Recursive function to traverse network downward and update ownership
+	const processNode = (nodeId: string) => {
+		if (processed.has(nodeId)) return; // Prevent cycles
+		processed.add(nodeId);
 
-	// Initialize all nodes with inventory and max capacity
-	const initializedNodes = pyramid.nodes.map((node) => ({
-		...node,
-		inventory: {},
-		maxInventory: DEFAULT_MAX_INVENTORY,
-	}));
-	pyramid.nodes = initializedNodes;
+		// Find nodes that are directly below this node
+		const childLinks = pyramid.links.filter((link) => link.target === nodeId);
 
-	// Make sure there are recruitable nodes below the player's position
-	// If player is not at the bottom level, check if there are nodes below
-	if (playerNode && playerNode.level < 7) {
-		// Get all nodes directly below the player
-		const nodesBelow = pyramid.nodes.filter(
-			(node) =>
-				node.level === playerNode.level + 1 &&
-				pyramid.links.some(
-					(link) => link.source === node.id && link.target === playerNode.id,
-				),
-		);
+		for (const link of childLinks) {
+			const childNodeIndex = updatedNodes.findIndex(
+				(node) => node.id === link.source,
+			);
 
-		console.log(`Found ${nodesBelow.length} nodes directly below player`);
-
-		// If there are no nodes below, add 2-3 nodes for initial recruitment targets
-		if (nodesBelow.length === 0) {
-			const numNodesToAdd = Math.floor(Math.random() * 2) + 2; // 2-3 nodes
-			console.log(`Adding ${numNodesToAdd} initial recruitment targets`);
-
-			for (let i = 0; i < numNodesToAdd; i++) {
-				// Add new node to the pyramid
-				const result = addNodeToPyramid(
-					pyramid,
-					playerNode.id,
-					playerNode.level + 1,
-				);
-
-				pyramid.nodes = result.pyramid.nodes;
-				pyramid.links = result.pyramid.links;
-
-				// Mark new nodes as potential recruits
-				const newNodeIndex = pyramid.nodes.findIndex(
-					(node) => node.id === result.newNodeId,
-				);
-				if (newNodeIndex >= 0) {
-					pyramid.nodes[newNodeIndex] = {
-						...pyramid.nodes[newNodeIndex],
-						isPotentialRecruit: true,
-						inventory: {},
-						maxInventory: DEFAULT_MAX_INVENTORY,
+			if (childNodeIndex >= 0) {
+				// Update ownership
+				if (isPlayer) {
+					// For player network, mark as owned by player
+					updatedNodes[childNodeIndex] = {
+						...updatedNodes[childNodeIndex],
+						ownedByPlayer: true,
+						aiControlled: false, // Remove from AI network if it was there
+						lastUpdated: Date.now(),
 					};
+				} else {
+					// For AI network (not needed for current fix, but included for future use)
+					if (!updatedNodes[childNodeIndex].ownedByPlayer) {
+						// Don't take over player nodes
+						updatedNodes[childNodeIndex] = {
+							...updatedNodes[childNodeIndex],
+							aiControlled: true,
+							ownedByPlayer: false,
+							lastUpdated: Date.now(),
+						};
+					}
 				}
 
-				console.log(
-					`Added initial recruitment target at level ${playerNode.level + 1}, nodeId: ${result.newNodeId}`,
-				);
+				// Process children of this node recursively
+				processNode(link.source);
 			}
 		}
+	};
+
+	// Start the propagation from the given node
+	processNode(startNodeId);
+
+	// Return updated pyramid with ownership propagated
+	return {
+		...pyramid,
+		nodes: updatedNodes,
+		version: (pyramid.version || 0) + 1, // Increment version
+	};
+};
+
+// Create initial game state
+const createInitialGameState = (): GameState => {
+	// Generate basic pyramid structure
+	const pyramid = generatePyramid(7, 5); // 7 levels total, player starts at level 5
+
+	// Clear any existing player/AI positions and ownership
+	pyramid.nodes.forEach((node) => {
+		node.isPlayerPosition = false;
+		node.ownedByPlayer = false;
+		node.aiControlled = false;
+		node.name = undefined;
+	});
+
+	// Set up initial player stats
+	const initialPlayerStats: PlayerStats = {
+		money: 1000,
+		recruits: 0,
+		level: 5, // Start at level 5 of the pyramid
+		currentNodeId: "",
+		charisma: 1,
+		recruitingPower: 1,
+		energy: MAX_ENERGY, // Start with full energy
+		reputation: 1,
+		isResting: false,
+		restUntil: 0,
+		recoveryPercentage: undefined,
+		inventory: {},
+		totalSalesRandom: 0,
+		totalSalesDownstream: 0,
+	};
+
+	// Step 1: Place player at a node in level 5
+	const level5Nodes = pyramid.nodes.filter((node) => node.level === 5);
+	// Place player at a random position in level 5, not always in the center
+	const playerNodeIndex = Math.floor(Math.random() * level5Nodes.length);
+	const playerNode = level5Nodes[playerNodeIndex];
+
+	// Mark the player's node
+	if (playerNode) {
+		playerNode.isPlayerPosition = true;
+		playerNode.ownedByPlayer = true;
+		initialPlayerStats.currentNodeId = playerNode.id;
+		console.log(
+			`Player randomly placed at node ${playerNode.id} on level ${playerNode.level} (position ${playerNodeIndex + 1} of ${level5Nodes.length})`,
+		);
+	}
+
+	// Step 2: Create AI competitors (5-7 competitors)
+	const numAICompetitors = 5 + Math.floor(Math.random() * 3); // 5-7 AI competitors
+	console.log(`Creating ${numAICompetitors} AI competitors`);
+
+	const aiCompetitors = [];
+
+	// Select nodes for AI competitors (preferably on levels 3-6)
+	const possibleAINodes = pyramid.nodes.filter(
+		(node) =>
+			node.level >= 3 &&
+			node.level <= 6 &&
+			!node.isPlayerPosition &&
+			!node.ownedByPlayer &&
+			// Ensure AI competitors are not placed below the player
+			!isNodeBelow(pyramid, node.id, playerNode.id),
+	);
+
+	// Shuffle the possible nodes to randomize AI placement
+	const shuffledAINodes = [...possibleAINodes].sort(() => Math.random() - 0.5);
+
+	// Create AI competitors
+	for (let i = 0; i < Math.min(numAICompetitors, shuffledAINodes.length); i++) {
+		const aiNode = shuffledAINodes[i];
+		const aiName = `Competitor ${i + 1}`;
+		const aiStrategy = Math.random() < 0.5 ? "aggressive" : "steady";
+
+		aiNode.aiControlled = true;
+		aiNode.name = aiName;
+		aiNode.aiStrategy = aiStrategy;
+
+		aiCompetitors.push({
+			id: aiNode.id,
+			name: aiName,
+			strategy: aiStrategy,
+			level: aiNode.level,
+		});
+
+		console.log(`AI competitor ${aiName} placed at level ${aiNode.level}`);
+	}
+
+	// Step 3: Assign nodes to networks based on hierarchy
+	// First pass: assign all nodes directly connected (below) to owned nodes
+	let assignedSomeNodes = true;
+	while (assignedSomeNodes) {
+		assignedSomeNodes = false;
+
+		// For each node in the pyramid
+		for (const node of pyramid.nodes) {
+			// Skip if already assigned
+			if (node.ownedByPlayer || node.aiControlled) {
+				continue;
+			}
+
+			// Get nodes above this node
+			const nodesAbove = getNodesAbove(pyramid, node.id);
+
+			// Check if any node above is owned by player or AI
+			for (const aboveNode of nodesAbove) {
+				const owningNode = pyramid.nodes.find((n) => n.id === aboveNode.id);
+				if (owningNode) {
+					if (owningNode.ownedByPlayer) {
+						// This node belongs to player's network but ONLY if it's below the player's position
+						if (isNodeBelow(pyramid, node.id, playerNode.id)) {
+							node.ownedByPlayer = true;
+							assignedSomeNodes = true;
+							break;
+						}
+					} else if (owningNode.aiControlled) {
+						// This node belongs to AI's network
+						node.aiControlled = true;
+						node.aiStrategy = owningNode.aiStrategy;
+						node.name = owningNode.name
+							? `${owningNode.name}'s Recruit`
+							: "AI Recruit";
+						assignedSomeNodes = true;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	// Step 4: Assign any remaining unowned nodes randomly
+	const unownedNodes = pyramid.nodes.filter(
+		(node) => !node.ownedByPlayer && !node.aiControlled,
+	);
+
+	if (unownedNodes.length > 0) {
+		console.log(`Assigning ${unownedNodes.length} remaining unowned nodes`);
+
+		for (const node of unownedNodes) {
+			// For nodes below the player, give higher chance to be player-owned
+			const isBelow = isNodeBelow(pyramid, node.id, playerNode.id);
+
+			// Only assign to player if it's below the player's position
+			if (isBelow && Math.random() < 0.5) {
+				node.ownedByPlayer = true;
+			} else {
+				node.aiControlled = true;
+				// Pick a random AI competitor to own this node
+				const randomAI =
+					aiCompetitors[Math.floor(Math.random() * aiCompetitors.length)];
+				node.aiStrategy = randomAI.strategy;
+				node.name = `${randomAI.name}'s Recruit`;
+			}
+		}
+	}
+
+	// Helper to check if one node is below another in the hierarchy
+	function isNodeBelow(
+		pyramid: PyramidGraph,
+		nodeId: string,
+		ancestorId: string,
+		visited: Set<string> = new Set(),
+	): boolean {
+		if (visited.has(nodeId)) return false; // Prevent cycles
+		visited.add(nodeId);
+
+		// Get direct parents of this node
+		const parents = pyramid.links
+			.filter((link) => link.source === nodeId)
+			.map((link) => link.target);
+
+		// Check if any parent is the ancestor we're looking for
+		if (parents.includes(ancestorId)) return true;
+
+		// Recursively check each parent
+		for (const parentId of parents) {
+			if (isNodeBelow(pyramid, parentId, ancestorId, visited)) return true;
+		}
+
+		return false;
 	}
 
 	// Add version number to track changes
@@ -160,12 +334,78 @@ const createInitialGameState = (): GameState => {
 		playerInventory[product.id] = 5; // Start with 5 of each product
 	});
 
+	// Calculate initial recruit count based on owned nodes
+	const playerOwnedNodes = pyramid.nodes.filter(
+		(node) => node.ownedByPlayer && !node.isPlayerPosition,
+	);
+
+	// STRICT ENFORCEMENT: Limit initial recruits to maximum of 2
+	// If we have more than 2 owned nodes, we need to reassign some to AI competitors
+	if (playerOwnedNodes.length > 2) {
+		console.log(
+			`Strictly limiting player's initial recruits from ${playerOwnedNodes.length} to 2`,
+		);
+
+		// Keep track of nodes to unassign from player's network
+		const nodesToRemove = [...playerOwnedNodes];
+		// Shuffle the array to randomize which nodes we keep
+		nodesToRemove.sort(() => Math.random() - 0.5);
+
+		// Keep only 2 nodes in the player's network
+		const nodesToKeep = nodesToRemove.splice(0, 2);
+
+		// Reset all player-owned nodes
+		for (const node of pyramid.nodes) {
+			if (node.ownedByPlayer && !node.isPlayerPosition) {
+				// Reset to unowned
+				node.ownedByPlayer = false;
+			}
+		}
+
+		// Mark only the kept nodes as player-owned
+		for (const nodeToKeep of nodesToKeep) {
+			const nodeIndex = pyramid.nodes.findIndex((n) => n.id === nodeToKeep.id);
+			if (nodeIndex >= 0) {
+				pyramid.nodes[nodeIndex].ownedByPlayer = true;
+			}
+		}
+
+		// Reassign the other nodes to AIs
+		for (const nodeToReassign of nodesToRemove) {
+			const nodeIndex = pyramid.nodes.findIndex(
+				(n) => n.id === nodeToReassign.id,
+			);
+			if (nodeIndex >= 0) {
+				// Assign to a random AI competitor
+				const randomAI =
+					aiCompetitors[Math.floor(Math.random() * aiCompetitors.length)];
+				pyramid.nodes[nodeIndex].aiControlled = true;
+				pyramid.nodes[nodeIndex].aiStrategy = randomAI.strategy;
+				pyramid.nodes[nodeIndex].name = `${randomAI.name}'s Recruit`;
+			}
+		}
+	}
+
+	// Final check: count actual player-owned nodes that aren't the player
+	const finalPlayerOwnedNodes = pyramid.nodes.filter(
+		(node) => node.ownedByPlayer && !node.isPlayerPosition,
+	);
+	const initialRecruits = finalPlayerOwnedNodes.length;
+
+	console.log(
+		`Player starting with ${initialRecruits} recruits and ${Object.keys(playerInventory).length} product types`,
+	);
+	console.log(
+		`AI distribution: ${aiCompetitors.map((ai) => ai.name + " (Level " + ai.level + ")").join(", ")}`,
+	);
+
 	return {
 		pyramid,
 		player: {
 			...initialPlayerStats,
 			currentNodeId: playerNode?.id || "",
 			inventory: playerInventory,
+			recruits: initialRecruits,
 		},
 		gameLevel: 1,
 		turns: 0,
@@ -173,11 +413,8 @@ const createInitialGameState = (): GameState => {
 		gameHour: 9, // Start at 9 AM
 		gameOver: false,
 		isWinner: false,
-		pendingRecruits: [],
 		lastDailyEnergyBonus: 0,
 		products: productDefinitions,
-		aiUpdateCounter: 0,
-		pyramidVersion: 0,
 		marketingEvents: [], // Initialize empty marketing events array
 	};
 };
@@ -191,11 +428,13 @@ const incrementPyramidVersion = (pyramid: PyramidGraph) => {
 };
 
 // Helper function to ensure player always has nodes to recruit below them
+// Now only checks if there are nodes below, but doesn't mark them as potential recruits
+// since recruitment is now only via marketing events
 const ensureRecruitableNodesBelow = (
 	pyramidGraph: PyramidGraph,
 	playerNodeId: string,
-) => {
-	console.log(`Ensuring recruitable nodes below player ${playerNodeId}`);
+): PyramidGraph => {
+	console.log(`Ensuring nodes below player ${playerNodeId}`);
 
 	// Get the player node
 	const playerNode = pyramidGraph.nodes.find(
@@ -217,11 +456,11 @@ const ensureRecruitableNodesBelow = (
 
 	console.log(`Found ${nodesBelow.length} nodes directly below player`);
 
-	// If there are fewer than 2 nodes below, add new ones
+	// If there are fewer than 2 nodes below, add new ones without marking them as potential recruits
 	let updatedPyramid = { ...pyramidGraph };
 	if (nodesBelow.length < 2 && playerNode.level < 7) {
 		const numNodesToAdd = 2 - nodesBelow.length;
-		console.log(`Adding ${numNodesToAdd} new recruitment targets`);
+		console.log(`Adding ${numNodesToAdd} new nodes below player`);
 
 		for (let i = 0; i < numNodesToAdd; i++) {
 			// Add new node to the pyramid
@@ -233,19 +472,21 @@ const ensureRecruitableNodesBelow = (
 
 			updatedPyramid = result.pyramid;
 
-			// Mark the new node as a potential recruit
+			// Initialize the node with inventory but don't mark as potential recruit
 			const newNodeIndex = updatedPyramid.nodes.findIndex(
 				(node) => node.id === result.newNodeId,
 			);
 			if (newNodeIndex >= 0) {
 				updatedPyramid.nodes[newNodeIndex] = {
 					...updatedPyramid.nodes[newNodeIndex],
-					isPotentialRecruit: true,
+					// isPotentialRecruit: true, // Removed - recruitment now only via marketing events
+					inventory: {},
+					maxInventory: DEFAULT_MAX_INVENTORY,
 				};
 			}
 
 			console.log(
-				`Added new recruitment target at level ${playerNode.level + 1}, nodeId: ${result.newNodeId}`,
+				`Added new node at level ${playerNode.level + 1}, nodeId: ${result.newNodeId}`,
 			);
 		}
 
@@ -256,10 +497,9 @@ const ensureRecruitableNodesBelow = (
 	return updatedPyramid;
 };
 
-// Process day cycle - resolve recruitment attempts
+// Process day cycle - AI behaviors and passive game mechanics
 const processDayCycle = (state: GameState): GameState => {
-	// Process any pending recruitment attempts
-	const successfulRecruits = [];
+	// Initialize variables for tracking changes
 	let updatedNodes = [...state.pyramid.nodes];
 	let updatedLinks = [...state.pyramid.links];
 	let newRecruits = state.player.recruits;
@@ -270,915 +510,131 @@ const processDayCycle = (state: GameState): GameState => {
 	};
 	let pyramidChanged = false;
 
-	// Debug log with more detailed information
+	// Debug log
 	console.log(
-		`%c[DAY CYCLE] Processing day ${state.gameDay}, Pending recruits: ${state.pendingRecruits.length}`,
+		`%c[DAY CYCLE] Processing day ${state.gameDay}`,
 		"background: #3f51b5; color: white; padding: 2px 5px; border-radius: 3px;",
 	);
 
-	// 1. Generate potential recruits based on charisma
-	// Higher charisma = more potential recruits generated
-	const charismaGenerationChance = 0.08 + state.player.charisma * 0.015; // Reduced from 0.12 + charisma * 0.025
-	const shouldGenerateNewRecruits = Math.random() < charismaGenerationChance;
+	// 1. Generate potential recruits based on charisma - REMOVED as recruitment is now only via marketing events
 
-	console.log(
-		`%c[CHARISMA GENERATION] Chance to generate new recruits: ${Math.round(charismaGenerationChance * 100)}%, Result: ${shouldGenerateNewRecruits ? "GENERATING" : "NOT GENERATING"}`,
-		"background: #9c27b0; color: white; padding: 2px 5px; border-radius: 3px;",
-	);
+	// 2. Process AI behaviors
+	// For simplicity, AI takes turns recruiting nodes
+	// Make the AI more competitive by giving them a chance to recruit nodes
+	const aiChanceToRecruit = AI_NODE_RECRUIT_CHANCE; // Chance for AI to try recruiting
+	const shouldAIRecruit = Math.random() < aiChanceToRecruit;
 
-	if (shouldGenerateNewRecruits) {
-		// Find player node
-		const playerNode = updatedNodes.find((node) => node.isPlayerPosition);
-		if (playerNode) {
-			// Calculate number of new nodes based on charisma (1-3 nodes)
-			const numNewNodes = Math.min(
-				3,
-				Math.max(
-					1,
-					Math.floor(Math.random() * (state.player.charisma / 2)) + 1,
-				),
-			);
-
-			console.log(
-				`[CHARISMA GENERATION] Generating ${numNewNodes} new potential recruits near player`,
-			);
-
-			// Add new potential recruits around the player's network
-			// First, get all nodes owned by player to potentially place recruits below them
-			const ownedNodes = updatedNodes.filter((node) => node.ownedByPlayer);
-
-			if (ownedNodes.length > 0) {
-				for (let i = 0; i < numNewNodes; i++) {
-					// Choose a random owned node as parent
-					const parentNode =
-						ownedNodes[Math.floor(Math.random() * ownedNodes.length)];
-					const newLevel = parentNode.level + 1;
-
-					// Don't add nodes beyond level 10
-					if (newLevel <= 10) {
-						const result = addNodeToPyramid(
-							updatedPyramid,
-							parentNode.id,
-							newLevel,
-						);
-						updatedPyramid = result.pyramid;
-						updatedNodes = updatedPyramid.nodes;
-						updatedLinks = updatedPyramid.links;
-
-						// Mark the new node as a potential recruit
-						const newNodeIndex = updatedNodes.findIndex(
-							(node) => node.id === result.newNodeId,
-						);
-						if (newNodeIndex >= 0) {
-							updatedNodes[newNodeIndex] = {
-								...updatedNodes[newNodeIndex],
-								isPotentialRecruit: true,
-							};
-							updatedPyramid.nodes = updatedNodes;
-						}
-
-						pyramidChanged = true;
-
-						console.log(
-							`[CHARISMA GENERATION] Added new potential recruit below node at level ${parentNode.level}, ID: ${result.newNodeId.substring(0, 6)}...`,
-						);
-					}
-				}
-			} else {
-				// If no owned nodes yet, add below player position
-				for (let i = 0; i < numNewNodes; i++) {
-					if (playerNode.level < 7) {
-						const result = addNodeToPyramid(
-							updatedPyramid,
-							playerNode.id,
-							playerNode.level + 1,
-						);
-						updatedPyramid = result.pyramid;
-						updatedNodes = updatedPyramid.nodes;
-						updatedLinks = updatedPyramid.links;
-
-						// Mark the new node as a potential recruit
-						const newNodeIndex = updatedNodes.findIndex(
-							(node) => node.id === result.newNodeId,
-						);
-						if (newNodeIndex >= 0) {
-							updatedNodes[newNodeIndex] = {
-								...updatedNodes[newNodeIndex],
-								isPotentialRecruit: true,
-							};
-							updatedPyramid.nodes = updatedNodes;
-						}
-
-						pyramidChanged = true;
-
-						console.log(
-							`[CHARISMA GENERATION] Added new potential recruit below player, ID: ${result.newNodeId.substring(0, 6)}...`,
-						);
-					}
-				}
-			}
-		}
-	}
-
-	// 2. Process AI node recruitment and expansion
-	// This simulates competition in the pyramid
-	const aiNodes = updatedNodes.filter((node) => node.aiControlled);
-	if (aiNodes.length > 0) {
-		console.log(
-			`[AI ACTIVITY] Processing ${aiNodes.length} AI-controlled nodes`,
+	if (shouldAIRecruit) {
+		// Look for unowned nodes that could be recruited by the AI
+		const unownedNodes = updatedNodes.filter(
+			(node) =>
+				!node.ownedByPlayer && !node.aiControlled && !node.isPlayerPosition,
 		);
 
-		for (const aiNode of aiNodes) {
-			// AI nodes can recruit unowned nodes below them
-			const nodesBelow = updatedNodes.filter(
-				(node) =>
-					node.level === aiNode.level + 1 &&
-					!node.ownedByPlayer &&
-					!node.aiControlled &&
-					updatedPyramid.links.some(
-						(link) => link.source === node.id && link.target === aiNode.id,
-					),
+		if (unownedNodes.length > 0) {
+			// Choose a random unowned node to recruit
+			const targetIndex = Math.floor(Math.random() * unownedNodes.length);
+			const targetNode = unownedNodes[targetIndex];
+
+			// Find a suitable parent for the AI node (either another AI node or a neutral node)
+			const potentialParentLinks = updatedLinks.filter(
+				(link) => link.source === targetNode.id,
 			);
 
-			// Try to recruit unowned nodes (can potentially "snipe" player's targets)
-			if (nodesBelow.length > 0 && Math.random() < AI_NODE_RECRUIT_CHANCE) {
-				const targetNode =
-					nodesBelow[Math.floor(Math.random() * nodesBelow.length)];
-				const nodeIndex = updatedNodes.findIndex(
-					(node) => node.id === targetNode.id,
+			if (potentialParentLinks.length > 0) {
+				// Choose a random parent
+				const randomParentLink =
+					potentialParentLinks[
+						Math.floor(Math.random() * potentialParentLinks.length)
+					];
+				const parentId = randomParentLink.target;
+
+				// Find the parent node
+				const parentNodeIndex = updatedNodes.findIndex(
+					(node) => node.id === parentId,
 				);
 
-				if (nodeIndex >= 0) {
-					// AI successfully recruits the node
-					updatedNodes[nodeIndex] = {
-						...updatedNodes[nodeIndex],
-						aiControlled: true,
-						lastUpdated: Date.now(),
-					};
-
-					pyramidChanged = true;
-					console.log(
-						`[AI RECRUITMENT] AI node ${aiNode.id.substring(0, 6)}... recruited node ${targetNode.id.substring(0, 6)}...`,
-					);
-
-					// AI nodes can also expand the pyramid (generate new potential recruits)
-					if (Math.random() < AI_NODE_EXPANSION_CHANCE) {
-						const newLevel = targetNode.level + 1;
-						if (newLevel <= 10) {
-							const numNodesToAdd = Math.floor(Math.random() * 2) + 1;
-
-							for (let i = 0; i < numNodesToAdd; i++) {
-								const result = addNodeToPyramid(
-									updatedPyramid,
-									targetNode.id,
-									newLevel,
-								);
-								updatedPyramid = result.pyramid;
-								updatedNodes = updatedPyramid.nodes;
-								updatedLinks = updatedPyramid.links;
-								pyramidChanged = true;
-
-								console.log(
-									`[AI EXPANSION] AI created new node ${result.newNodeId.substring(0, 6)}... at level ${newLevel}`,
-								);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 3. Process natural recruitment (if no player-initiated recruits)
-	if (state.pendingRecruits.length === 0) {
-		console.log(
-			"[DAY CYCLE] No pending recruits to process, checking for natural recruits",
-		);
-
-		// Find player node
-		const playerNode = updatedNodes.find((node) => node.isPlayerPosition);
-		if (playerNode) {
-			// Get nodes directly below the player
-			const nodesBelow = updatedNodes.filter(
-				(node) =>
-					node.level === playerNode.level + 1 &&
-					updatedPyramid.links.some(
-						(link) => link.source === node.id && link.target === playerNode.id,
-					),
-			);
-
-			// Find nodes that aren't already owned by player or AI
-			const unownedNodesBelow = nodesBelow.filter(
-				(node) => !node.ownedByPlayer && !node.aiControlled,
-			);
-			console.log(
-				`[NATURAL RECRUITS] Found ${unownedNodesBelow.length} potential unowned nodes below player`,
-			);
-
-			// If there are unowned nodes, add some of them to pending recruits
-			if (unownedNodesBelow.length > 0) {
-				// Recruiting chance influenced by charisma for GENERATION only
-				const naturalRecruitChance = 0.12 + state.player.charisma * 0.02; // Reduced from 0.2 + charisma * 0.03
-				const shouldAddNaturalRecruits = Math.random() < naturalRecruitChance;
-
-				if (shouldAddNaturalRecruits) {
-					// Calculate recruitment chance based on player stats
-					// Recruiting power is the main factor for success chance
-					let baseChance =
-						BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.06; // Changed from 0.04
-					// Charisma no longer affects recruitment success chance
-					// Money provides a small boost
-					baseChance += state.player.money * MONEY_RECRUITMENT_FACTOR;
-					baseChance += 0.01; // Reduced from 0.02
-					const recruitmentChance = Math.min(baseChance, 0.65); // Reduced from 0.75
-
-					// Take up to 2 random unowned nodes and add them to pending recruits
-					const numToAdd = Math.min(2, unownedNodesBelow.length);
-					const shuffled = [...unownedNodesBelow].sort(
-						() => 0.5 - Math.random(),
-					);
-					const selected = shuffled.slice(0, numToAdd);
-
-					// Create new pending recruits
-					const naturalRecruits = selected.map((node) => ({
-						nodeId: node.id,
-						chance: recruitmentChance,
-					}));
-
-					console.log(
-						`[NATURAL RECRUITS] Added ${naturalRecruits.length} natural recruitment attempts for next day`,
-					);
-
-					// Process these natural recruits immediately
-					for (const recruit of naturalRecruits) {
-						const roll = Math.random();
-						const isSuccessful = roll < recruit.chance;
-
-						console.log(
-							`%c[NATURAL RECRUITMENT] Node ${recruit.nodeId.substring(0, 6)}... 
-							Chance: ${(recruit.chance * 100).toFixed(1)}% (${isSuccessful ? "SUCCESS" : "FAILURE"}) 
-							Roll: ${(roll * 100).toFixed(1)}% < ${(recruit.chance * 100).toFixed(1)}%`,
-							`background: ${isSuccessful ? "#4caf50" : "#f44336"}; color: white; padding: 2px 5px; border-radius: 3px;`,
-						);
-
-						if (isSuccessful) {
-							// Find the node and mark as owned
-							const nodeIndex = updatedNodes.findIndex(
-								(node) => node.id === recruit.nodeId,
-							);
-
-							if (nodeIndex >= 0) {
-								console.log(
-									`[NATURAL SUCCESS] Node at index ${nodeIndex} marked as owned`,
-								);
-
-								updatedNodes[nodeIndex] = {
-									...updatedNodes[nodeIndex],
-									ownedByPlayer: true,
-									isPotentialRecruit: false,
-									lastUpdated: Date.now(),
-								};
-
-								pyramidChanged = true;
-								successfulRecruits.push(recruit.nodeId);
-								newRecruits++;
-
-								// Generate new potential recruits below (influenced by charisma)
-								const newNodeChance =
-									NEW_RECRUIT_CHANCE + state.player.charisma * 0.04;
-								if (Math.random() < newNodeChance) {
-									// Add 1-2 new nodes below this newly recruited node
-									const numNewNodes = Math.floor(Math.random() * 2) + 1;
-									console.log(
-										`[NATURAL SUCCESS] Generating ${numNewNodes} new recruits below node ${recruit.nodeId.substring(0, 6)}...`,
-									);
-
-									const parentNode = updatedNodes[nodeIndex];
-									const newLevel = parentNode.level + 1;
-
-									if (newLevel <= 10) {
-										for (let i = 0; i < numNewNodes; i++) {
-											const result = addNodeToPyramid(
-												updatedPyramid,
-												parentNode.id,
-												newLevel,
-											);
-
-											updatedPyramid = result.pyramid;
-											updatedNodes = updatedPyramid.nodes;
-											updatedLinks = updatedPyramid.links;
-											pyramidChanged = true;
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			} else {
-				// If no unowned nodes, check if we need to add some
-				if (nodesBelow.length < 2) {
-					console.log(
-						"[NATURAL RECRUITS] Not enough nodes below player, adding new ones",
-					);
-
-					// Add 1-2 new potential recruits
-					const numToAdd = 2 - nodesBelow.length;
-					for (let i = 0; i < numToAdd; i++) {
-						const result = addNodeToPyramid(
-							updatedPyramid,
-							playerNode.id,
-							playerNode.level + 1,
-						);
-
-						updatedPyramid = result.pyramid;
-						updatedNodes = updatedPyramid.nodes;
-						updatedLinks = updatedPyramid.links;
-						pyramidChanged = true;
-
-						console.log(
-							`[NATURAL RECRUITS] Added new potential recruit node ${result.newNodeId.substring(0, 6)}...`,
-						);
-					}
-				}
-			}
-		}
-
-		// If there are still no pending recruits, just return the updated state
-		if (state.pendingRecruits.length === 0 && successfulRecruits.length === 0) {
-			if (pyramidChanged) {
-				updatedPyramid = incrementPyramidVersion(updatedPyramid);
-				console.log(
-					`[PYRAMID] Version updated to ${updatedPyramid.version} due to natural recruit changes`,
-				);
-			}
-
-			return {
-				...state,
-				pyramid: updatedPyramid,
-				player: {
-					...state.player,
-					recruits: newRecruits,
-				},
-			};
-		}
-	}
-
-	// Log player stats for debugging with more details
-	console.log(
-		`%c[PLAYER STATS] Charisma: ${state.player.charisma}, Recruiting Power: ${state.player.recruitingPower}, Money: $${state.player.money}`,
-		"background: #4caf50; color: white; padding: 2px 5px; border-radius: 3px;",
-	);
-
-	// 4. Process player-initiated recruitment attempts
-	// Calculate base formula for recruitment chance
-	// Recruiting power has the strongest effect on recruitment success
-	let baseFormula =
-		BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.06; // Changed from 0.04
-	// Charisma no longer affects recruitment success
-	// Money provides a smaller boost
-	baseFormula += state.player.money * MONEY_RECRUITMENT_FACTOR;
-	// Smaller base bonus
-	baseFormula += 0.01; // Reduced from 0.02
-	// Cap at 65%
-	const cappedFormula = Math.min(0.65, baseFormula); // Reduced from 0.75
-
-	console.log(
-		`%c[RECRUIT CHANCE] Base formula: ${BASE_RECRUITMENT_CHANCE} + (${state.player.recruitingPower} × 0.06) + ($${state.player.money} × ${MONEY_RECRUITMENT_FACTOR}) + 0.01 bonus = ${baseFormula.toFixed(2)} → capped at ${cappedFormula.toFixed(2)} (${Math.round(cappedFormula * 100)}%)`,
-		"background: #ff9800; color: white; padding: 2px 5px; border-radius: 3px;",
-	);
-
-	for (const pendingRecruit of state.pendingRecruits) {
-		// Apply the formula for this specific recruitment
-		const recruitChance = Math.min(
-			0.65, // Cap at 65% max (reduced from 70%)
-			pendingRecruit.chance + 0.03, // Add 3% bonus to stored chance (reduced from 5%)
-		);
-
-		const roll = Math.random();
-		const isSuccessful = roll < recruitChance;
-
-		// More visible and detailed recruitment attempt log
-		console.log(
-			`%c[RECRUITMENT ATTEMPT] Node ${pendingRecruit.nodeId.substring(0, 6)}... 
-			Chance: ${(recruitChance * 100).toFixed(1)}% (${isSuccessful ? "SUCCESS" : "FAILURE"}) 
-			Roll: ${(roll * 100).toFixed(1)}% < ${(recruitChance * 100).toFixed(1)}%`,
-			`background: ${isSuccessful ? "#4caf50" : "#f44336"}; color: white; padding: 2px 5px; border-radius: 3px;`,
-		);
-
-		if (isSuccessful) {
-			// Find the node and mark as owned
-			const nodeIndex = updatedNodes.findIndex(
-				(node) => node.id === pendingRecruit.nodeId,
-			);
-
-			if (nodeIndex >= 0) {
-				// Make sure it hasn't been sniped by AI
-				if (updatedNodes[nodeIndex].aiControlled) {
-					console.log(
-						`[FAILURE] Node ${pendingRecruit.nodeId.substring(0, 6)}... was already recruited by AI!`,
-					);
-					continue;
-				}
-
-				console.log(
-					`[SUCCESS] Found node at index ${nodeIndex}, marking as owned`,
-				);
-
-				updatedNodes[nodeIndex] = {
-					...updatedNodes[nodeIndex],
-					ownedByPlayer: true,
-					isPotentialRecruit: false,
-					lastUpdated: Date.now(),
-				};
-
-				// Find and mark the parent node (target of the link) as owned as well
-				// This ensures the connection in the pyramid is complete
-				const targetLink = updatedPyramid.links.find(
-					(link) => link.source === pendingRecruit.nodeId,
-				);
-				if (targetLink) {
-					const parentNodeIndex = updatedNodes.findIndex(
-						(node) => node.id === targetLink.target,
-					);
-					if (
-						parentNodeIndex >= 0 &&
-						!updatedNodes[parentNodeIndex].ownedByPlayer
-					) {
-						console.log(
-							`[SUCCESS] Also marking parent node ${targetLink.target.substring(0, 6)}... as owned`,
-						);
+				if (parentNodeIndex >= 0) {
+					// Mark the parent as AI controlled if it's not player-owned
+					if (!updatedNodes[parentNodeIndex].ownedByPlayer) {
 						updatedNodes[parentNodeIndex] = {
 							...updatedNodes[parentNodeIndex],
-							ownedByPlayer: true,
-							isPotentialRecruit: false,
+							aiControlled: true,
+							aiStrategy: Math.random() < 0.5 ? "aggressive" : "steady",
+							name: `Competitor ${Math.floor(Math.random() * 1000)}`,
 							lastUpdated: Date.now(),
 						};
 					}
-				}
 
-				pyramidChanged = true;
-				successfulRecruits.push(pendingRecruit.nodeId);
-				newRecruits++;
-
-				console.log(
-					`[SUCCESS] Recruited node ${pendingRecruit.nodeId.substring(0, 6)}..., new recruit count: ${newRecruits}`,
-				);
-
-				// Chance to generate new potential recruits below this node
-				// Based on charisma (more charisma = more likely to expand network)
-				const expansionChance =
-					NEW_RECRUIT_CHANCE + state.player.charisma * 0.04;
-				const shouldGenerateNewRecruits = Math.random() < expansionChance;
-
-				if (shouldGenerateNewRecruits) {
-					// Add 1-3 new nodes below this newly recruited node
-					// More recruiting power = more nodes generated
-					const maxNodes = Math.max(
-						1,
-						Math.min(3, Math.ceil(state.player.recruitingPower / 2)),
-					);
-					const numNewNodes = Math.floor(Math.random() * maxNodes) + 1;
-					console.log(
-						`[SUCCESS] Generating ${numNewNodes} new potential recruits below node ${pendingRecruit.nodeId.substring(0, 6)}...`,
+					// Find the index of the target node
+					const nodeIndex = updatedNodes.findIndex(
+						(node) => node.id === targetNode.id,
 					);
 
-					const parentNode = updatedNodes[nodeIndex];
-					const newLevel = parentNode.level + 1;
+					if (nodeIndex >= 0) {
+						// Mark the target node as AI controlled
+						updatedNodes[nodeIndex] = {
+							...updatedNodes[nodeIndex],
+							aiControlled: true,
+							aiStrategy: updatedNodes[parentNodeIndex].aiStrategy,
+							name: `${updatedNodes[parentNodeIndex].name}'s Recruit`,
+							lastUpdated: Date.now(),
+						};
 
-					// Don't add nodes beyond level 10 to prevent excessive growth
-					if (newLevel <= 10) {
-						for (let i = 0; i < numNewNodes; i++) {
-							// Add new node to the pyramid
+						pyramidChanged = true;
+
+						console.log(
+							`[AI RECRUITMENT] AI recruited node at level ${targetNode.level}, ID: ${targetNode.id}`,
+						);
+
+						// Add AI expansion behavior
+						if (Math.random() < AI_NODE_EXPANSION_CHANCE) {
+							// Add a new potential recruit node under the AI node
 							const result = addNodeToPyramid(
 								updatedPyramid,
-								parentNode.id,
-								newLevel,
+								targetNode.id,
+								targetNode.level + 1,
 							);
-
 							updatedPyramid = result.pyramid;
 							updatedNodes = updatedPyramid.nodes;
 							updatedLinks = updatedPyramid.links;
 
-							pyramidChanged = true;
-
 							console.log(
-								`[SUCCESS] Added new potential recruit: Node ${result.newNodeId.substring(0, 6)}... at level ${newLevel}`,
+								`[AI EXPANSION] AI added new potential recruit node below ${targetNode.id}`,
 							);
 						}
 					}
-				} else {
-					console.log("[SUCCESS] No new recruits generated below this node");
 				}
-			} else {
-				console.error(
-					`[ERROR] Could not find node with ID ${pendingRecruit.nodeId} in the pyramid`,
-				);
 			}
-		} else {
-			console.log(
-				`[FAILURE] Recruitment attempt for node ${pendingRecruit.nodeId.substring(0, 6)}... failed. Try improving Recruiting Power!`,
-			);
 		}
 	}
 
-	// Detailed summary logging
-	console.log(
-		`%c[RECRUITMENT SUMMARY] ${successfulRecruits.length}/${state.pendingRecruits.length} successful recruits, total recruits now: ${newRecruits}`,
-		"background: #9c27b0; color: white; padding: 2px 5px; border-radius: 3px;",
-	);
+	// Calculate player stats
+	let updatedPlayer = { ...state.player };
 
-	// Log node ownership stats
-	const ownedNodes = updatedNodes.filter((node) => node.ownedByPlayer).length;
-	const aiNodeCount = updatedNodes.filter((node) => node.aiControlled).length;
-	const totalNodes = updatedNodes.length;
-	const playerPercentage = ((ownedNodes / totalNodes) * 100).toFixed(1);
-	const aiPercentage = ((aiNodeCount / totalNodes) * 100).toFixed(1);
-	console.log(
-		`[PYRAMID STATUS] Owned nodes: ${ownedNodes} (${playerPercentage}%), AI nodes: ${aiNodeCount} (${aiPercentage}%), Total: ${totalNodes} nodes`,
-	);
-
-	// Process automatic sales from downstream nodes
-	// This simulates your recruits selling products to random people
-	const playerOwnedNodes = updatedNodes.filter(
-		(node) => node.ownedByPlayer && !node.isPlayerPosition,
-	);
-
-	if (playerOwnedNodes.length > 0) {
-		console.log(
-			`[DOWNSTREAM SALES] Processing sales from ${playerOwnedNodes.length} owned nodes`,
-		);
-
-		// Keep track of total profit from downstream sales
-		let totalDownstreamProfit = 0;
-		let totalDownstreamSales = 0;
-
-		// Calculate commission percentage based on player's charisma and reputation
-		// Higher charisma and reputation means higher percentage of downstream sales
-		const baseCommissionPercentage = 0.3; // 30% base
-		const charismaBonus = state.player.charisma * 0.03; // 3% per charisma point
-		const reputationBonus = state.player.reputation * 0.05; // 5% per reputation point
-		const commissionPercentage = Math.min(
-			0.8,
-			baseCommissionPercentage + charismaBonus + reputationBonus,
-		);
-
-		console.log(
-			`[DOWNSTREAM COMMISSION] Your commission rate is ${(commissionPercentage * 100).toFixed(1)}% (Base: 30%, Charisma: +${(charismaBonus * 100).toFixed(1)}%, Reputation: +${(reputationBonus * 100).toFixed(1)}%)`,
-		);
-
-		// First, automatically restock nodes with low inventory
-		const updatedPlayerInventory = { ...state.player.inventory };
-		let restockCost = 0;
-
-		console.log(
-			`[DOWNSTREAM RESTOCK] Automatically checking nodes that need restocking`,
-		);
-
-		// For each owned node, process sales based on their inventory
-		const nodesWithSales = playerOwnedNodes.map((node) => {
-			// Check if node needs restocking (less than 25% capacity)
-			const totalInventory = Object.values(node.inventory || {}).reduce(
-				(sum, qty) => sum + qty,
-				0,
+	// Process product sales (for both AI and player)
+	// For now, keep this simple - just simulate some money being made by owned nodes
+	// This can be expanded later with more complex sales mechanics
+	updatedNodes = updatedNodes.map((node) => {
+		if (node.ownedByPlayer || node.aiControlled) {
+			// Generate some random money for the node based on level
+			// Higher level nodes (closer to top) make more money
+			const moneyGenerated = Math.floor(
+				Math.random() * (8 - node.level) * 20 + 10,
 			);
-			const needsRestock = totalInventory < node.maxInventory * 0.25;
 
-			// Automatically restock if inventory is low
-			let updatedNodeInventory = { ...node.inventory };
-
-			if (needsRestock) {
-				console.log(
-					`[DOWNSTREAM RESTOCK] Node ${node.id.substring(0, 6)}... is low on inventory (${totalInventory}/${node.maxInventory})`,
-				);
-
-				// Look through player's inventory and restock one product at a time
-				// Prioritize products that the node already sells
-				let availableSpace = node.maxInventory - totalInventory;
-
-				// First try to restock products the node already has
-				for (const [productId, quantity] of Object.entries(
-					updatedNodeInventory,
-				)) {
-					if (quantity <= 2 && availableSpace > 0) {
-						// Only restock if less than 2 items left
-						const product = state.products.find((p) => p.id === productId);
-						if (!product) continue;
-
-						// Check if player has this product
-						const playerQuantity = updatedPlayerInventory[productId] || 0;
-						if (playerQuantity > 0) {
-							// Calculate how much to restock
-							const restockQuantity = Math.min(
-								Math.floor(node.maxInventory * 0.5) - quantity, // Restock to 50% capacity
-								playerQuantity, // Limited by player inventory
-								availableSpace, // Limited by available space
-							);
-
-							if (restockQuantity > 0) {
-								// Update node and player inventory
-								updatedNodeInventory[productId] =
-									(updatedNodeInventory[productId] || 0) + restockQuantity;
-								updatedPlayerInventory[productId] =
-									playerQuantity - restockQuantity;
-								availableSpace -= restockQuantity;
-
-								// Add to restock cost (player gets wholesale price)
-								restockCost += product.downsellPrice * restockQuantity;
-
-								console.log(
-									`[DOWNSTREAM RESTOCK] Restocked ${restockQuantity} ${product.name} to node ${node.id.substring(0, 6)}... for $${product.downsellPrice * restockQuantity}`,
-								);
-							}
-						}
-					}
-				}
-
-				// If the node still has space and few or no products, add some new products
-				if (
-					availableSpace > 0 &&
-					(Object.keys(updatedNodeInventory).length === 0 ||
-						totalInventory < node.maxInventory * 0.1)
-				) {
-					// Try to add new products the player has
-					for (const product of state.products) {
-						// Skip if node already has this product
-						if (
-							updatedNodeInventory[product.id] &&
-							updatedNodeInventory[product.id] > 0
-						) {
-							continue;
-						}
-
-						// Check if player has this product
-						const playerQuantity = updatedPlayerInventory[product.id] || 0;
-						if (playerQuantity > 0) {
-							// Calculate how much to stock
-							const stockQuantity = Math.min(
-								Math.floor(node.maxInventory * 0.3), // Stock to 30% capacity
-								playerQuantity, // Limited by player inventory
-								availableSpace, // Limited by available space
-							);
-
-							if (stockQuantity > 0) {
-								// Update node and player inventory
-								updatedNodeInventory[product.id] = stockQuantity;
-								updatedPlayerInventory[product.id] =
-									playerQuantity - stockQuantity;
-								availableSpace -= stockQuantity;
-
-								// Add to restock cost (player gets wholesale price)
-								restockCost += product.downsellPrice * stockQuantity;
-
-								console.log(
-									`[DOWNSTREAM RESTOCK] Added new product: ${stockQuantity} ${product.name} to node ${node.id.substring(0, 6)}... for $${product.downsellPrice * stockQuantity}`,
-								);
-							}
-						}
-					}
-				}
-			}
-
-			// Process sales for this node
-			let nodeProfit = 0;
-			let nodeSalesCount = 0;
-
-			// Skip if node has no inventory after restocking
-			if (
-				!updatedNodeInventory ||
-				Object.values(updatedNodeInventory).reduce(
-					(sum, qty) => sum + qty,
-					0,
-				) === 0
-			) {
-				return {
-					...node,
-					inventory: updatedNodeInventory,
-				};
-			}
-
-			// Calculate node-specific selling factors
-			// Nodes higher in the pyramid (lower level numbers) are better at selling
-			const levelFactor = Math.max(0, (7 - node.level) * 0.03); // 0% to 18% bonus based on level
-
-			// Nodes that have been owned longer have better reputation
-			const ageBonus = node.lastUpdated
-				? Math.min(
-						0.1,
-						((Date.now() - node.lastUpdated) / (1000 * 60 * 60 * 24)) * 0.01,
-					) // Up to 10% bonus for 10+ days owned
-				: 0;
-
-			// For each product in inventory, attempt to sell some
-			for (const [productId, quantity] of Object.entries(
-				updatedNodeInventory,
-			)) {
-				if (quantity <= 0) continue;
-
-				// Find product details
-				const product = state.products.find((p) => p.id === productId);
-				if (!product) continue;
-
-				// Calculate max items they can sell per day based on level
-				// Higher levels (lower numbers) can sell more items
-				const maxSellAttempts = Math.min(
-					quantity,
-					Math.floor(1 + (7 - node.level) * 0.7), // Increased from 0.5 to make higher levels more effective
-				);
-
-				if (maxSellAttempts <= 0) continue;
-
-				// Calculate chance of successful sale for this specific node and product
-				// Base chance from product
-				const nodeBaseSaleChance = Math.min(0.8, product.baseChance + 0.08);
-
-				// Apply node-specific factors
-				const nodeSaleChance = Math.min(
-					0.9,
-					nodeBaseSaleChance + levelFactor + ageBonus,
-				);
-
-				console.log(
-					`[DOWNSTREAM SALES] Node ${node.id.substring(0, 6)}... selling ${product.name}: Base chance ${(nodeBaseSaleChance * 100).toFixed(1)}% + Level bonus ${(levelFactor * 100).toFixed(1)}% + Age bonus ${(ageBonus * 100).toFixed(1)}% = Final chance ${(nodeSaleChance * 100).toFixed(1)}%`,
-				);
-
-				// Attempt to sell items
-				let soldItems = 0;
-				for (let i = 0; i < maxSellAttempts; i++) {
-					if (Math.random() < nodeSaleChance) {
-						soldItems++;
-					}
-				}
-
-				if (soldItems > 0) {
-					// Calculate profit
-					const salesRevenue = soldItems * product.basePrice;
-					nodeProfit += salesRevenue;
-					nodeSalesCount += soldItems;
-
-					// Update inventory
-					updatedNodeInventory[productId] = quantity - soldItems;
-
-					console.log(
-						`[DOWNSTREAM SALES] Node ${node.id.substring(0, 6)}... sold ${soldItems}/${maxSellAttempts} ${product.name} for $${salesRevenue}`,
-					);
-				}
-			}
-
-			// Split profits - node keeps (1-commission)%, player gets commission%
-			const playerCommission = Math.floor(nodeProfit * commissionPercentage);
-			const nodeKeeps = nodeProfit - playerCommission;
-
-			// Update totals
-			totalDownstreamProfit += playerCommission;
-			totalDownstreamSales += nodeSalesCount;
-
-			// Update node with new inventory and add profit
 			return {
 				...node,
-				inventory: updatedNodeInventory,
-				money: node.money + nodeKeeps, // Node keeps its portion of sales
-				lastRestocked: needsRestock ? Date.now() : node.lastRestocked,
+				money: node.money + moneyGenerated,
 			};
-		});
-
-		// Update nodes in the pyramid
-		updatedNodes = updatedNodes.map((node) => {
-			const updatedNode = nodesWithSales.find((n) => n.id === node.id);
-			if (updatedNode) {
-				return updatedNode;
-			}
-			return node;
-		});
-
-		updatedPyramid = {
-			...updatedPyramid,
-			nodes: updatedNodes,
-		};
-
-		// Update player with new inventory, money (adding commission), and sales count
-		let updatedPlayer = { ...state.player };
-
-		// Apply restocking cost to player's money
-		updatedPlayer.money = Math.max(0, updatedPlayer.money - restockCost);
-
-		// Add commission from sales to player's money
-		updatedPlayer.money += totalDownstreamProfit;
-
-		// Update player inventory after restocking
-		updatedPlayer.inventory = updatedPlayerInventory;
-
-		// Update total sales to downstream count
-		updatedPlayer.totalSalesDownstream =
-			(updatedPlayer.totalSalesDownstream || 0) + totalDownstreamSales;
-
-		if (restockCost > 0) {
-			console.log(`[DOWNSTREAM RESTOCK] Total restock cost: $${restockCost}`);
-			pyramidChanged = true;
 		}
+		return node;
+	});
 
-		// If downstream nodes made sales, indicate pyramid changed
-		if (totalDownstreamProfit > 0) {
-			pyramidChanged = true;
-			console.log(
-				`[DOWNSTREAM SALES] Your commission from downstream sales: $${totalDownstreamProfit} (${totalDownstreamSales} units sold)`,
-			);
-		} else {
-			console.log(
-				`[DOWNSTREAM SALES] No sales made by your downstreams today.`,
-			);
-		}
-	}
-
-	// Process automatic sales from player's inventory to random people
-	// This happens at the end of each day and doesn't cost energy
-	let updatedPlayer = { ...state.player };
-	const processPlayerRandomSales = () => {
-		console.log(
-			`[PLAYER RANDOM SALES] Processing automatic sales from player's inventory`,
-		);
-
-		// Skip if player has no inventory
-		if (
-			!updatedPlayer.inventory ||
-			Object.values(updatedPlayer.inventory).reduce(
-				(sum, qty) => sum + qty,
-				0,
-			) === 0
-		) {
-			console.log(`[PLAYER RANDOM SALES] No inventory to sell`);
-			return;
-		}
-
-		let totalSales = 0;
-		let totalRevenue = 0;
-		const updatedInventory = { ...updatedPlayer.inventory };
-
-		// For each product in player's inventory, attempt to sell some
-		for (const [productId, quantity] of Object.entries(updatedInventory)) {
-			if (quantity <= 0) continue;
-
-			// Find product details
-			const product = state.products.find((p) => p.id === productId);
-			if (!product) continue;
-
-			// Calculate max items player can sell per day
-			// This depends on charisma - higher charisma means more sales attempts
-			const maxSellAttempts = Math.min(
-				quantity,
-				Math.floor(3 + updatedPlayer.charisma),
-			);
-
-			if (maxSellAttempts <= 0) continue;
-
-			// Calculate sale chance based on charisma and product base chance
-			const saleChance = Math.min(
-				0.98, // Increased max cap from 0.95
-				product.baseChance + updatedPlayer.charisma * 0.06, // Increased charisma impact from 0.05
-			);
-
-			// Attempt to sell items
-			let soldItems = 0;
-			for (let i = 0; i < maxSellAttempts; i++) {
-				if (Math.random() < saleChance) {
-					soldItems++;
-				}
-			}
-
-			if (soldItems > 0) {
-				// Calculate revenue
-				const salesRevenue = soldItems * product.basePrice;
-				totalRevenue += salesRevenue;
-				totalSales += soldItems;
-
-				// Update inventory
-				updatedInventory[productId] = quantity - soldItems;
-
-				console.log(
-					`[PLAYER RANDOM SALES] Sold ${soldItems}/${maxSellAttempts} ${product.name} for $${salesRevenue}`,
-				);
-			}
-		}
-
-		// Update player with new inventory and money
-		if (totalSales > 0) {
-			updatedPlayer = {
-				...updatedPlayer,
-				inventory: updatedInventory,
-				money: updatedPlayer.money + totalRevenue,
-				totalSalesRandom: (updatedPlayer.totalSalesRandom || 0) + totalSales,
-			};
-
-			console.log(
-				`[PLAYER RANDOM SALES] Total sales: ${totalSales} items for $${totalRevenue}`,
-			);
-		} else {
-			console.log(`[PLAYER RANDOM SALES] No successful sales today`);
-		}
+	updatedPyramid = {
+		...updatedPyramid,
+		nodes: updatedNodes,
 	};
-
-	// Process player random sales
-	processPlayerRandomSales();
 
 	// Only increment version if the pyramid structure changed
 	if (pyramidChanged) {
@@ -1195,7 +651,7 @@ const processDayCycle = (state: GameState): GameState => {
 			...updatedPlayer,
 			recruits: newRecruits,
 		},
-		pendingRecruits: [], // Clear pending recruits after processing
+		// Removed pendingRecruits field
 	};
 };
 
@@ -1298,9 +754,20 @@ const processRecruitmentEvent = (
 		return state;
 	}
 
-	// Generate potential recruits
-	const newRecruits: { nodeId: string; chance: number }[] = [];
+	// Create a copy of the pyramid to modify
+	let updatedPyramid = { ...state.pyramid };
+	let updatedNodes = [...updatedPyramid.nodes];
+	let newRecruits = state.player.recruits;
+	let pyramidChanged = false;
 
+	// Get player node to add recruits below
+	const playerNode = updatedNodes.find((node) => node.isPlayerPosition);
+	if (!playerNode) {
+		console.error("Player node not found");
+		return state;
+	}
+
+	// Process each successful recruit attempt
 	for (let i = 0; i < successAttempts; i++) {
 		// Calculate recruitment chance based on player stats and event
 		const baseChance = 0.12 + state.player.charisma * 0.02;
@@ -1313,28 +780,72 @@ const processRecruitmentEvent = (
 			: 0;
 
 		// Calculate final chance, capped at 65%
-		let recruitChance = Math.min(
+		const recruitChance = Math.min(
 			0.65,
 			baseChance + recruitingBonus + reputationBonus + investmentBonus,
 		);
 
-		// Generate a unique node ID for the potential recruit
-		const potentialNodeId = `potential-${Date.now()}-${i}`;
-
-		newRecruits.push({
-			nodeId: potentialNodeId,
-			chance: recruitChance,
-		});
+		// Roll for recruitment success
+		const roll = Math.random();
+		const isSuccessful = roll < recruitChance;
 
 		console.log(
-			`Generated potential recruit with ${Math.round(recruitChance * 100)}% chance of success`,
+			`Marketing recruitment attempt ${i + 1}: Chance ${Math.round(recruitChance * 100)}%, Roll ${Math.round(roll * 100)}% - ${isSuccessful ? "SUCCESS" : "FAILURE"}`,
 		);
+
+		if (isSuccessful) {
+			// Add new node to the pyramid below the player
+			const result = addNodeToPyramid(
+				updatedPyramid,
+				playerNode.id,
+				playerNode.level + 1,
+			);
+
+			updatedPyramid = result.pyramid;
+			updatedNodes = updatedPyramid.nodes;
+
+			// Mark the new node as owned by player
+			const newNodeIndex = updatedNodes.findIndex(
+				(node) => node.id === result.newNodeId,
+			);
+
+			if (newNodeIndex >= 0) {
+				updatedNodes[newNodeIndex] = {
+					...updatedNodes[newNodeIndex],
+					ownedByPlayer: true,
+					lastUpdated: Date.now(),
+					// Initialize inventory
+					inventory: {},
+					maxInventory: DEFAULT_MAX_INVENTORY,
+				};
+
+				// Propagate ownership down from this new recruit to all nodes below it
+				updatedPyramid = propagateOwnership(updatedPyramid, result.newNodeId);
+				updatedNodes = updatedPyramid.nodes;
+
+				pyramidChanged = true;
+				newRecruits++;
+
+				console.log(
+					`Marketing event success: Added new recruit node at level ${playerNode.level + 1}, ID: ${result.newNodeId}`,
+				);
+			}
+		}
 	}
 
-	// Add new potential recruits to the state
+	// Update pyramid version if changed
+	if (pyramidChanged) {
+		updatedPyramid = incrementPyramidVersion(updatedPyramid);
+	}
+
+	// Return updated state
 	return {
 		...state,
-		pendingRecruits: [...state.pendingRecruits, ...newRecruits],
+		pyramid: updatedPyramid,
+		player: {
+			...state.player,
+			recruits: newRecruits,
+		},
 	};
 };
 
@@ -1495,56 +1006,6 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 					energy: player.energy - energyCost,
 					money: player.money - investmentAmount,
 				},
-			};
-		}
-
-		case "RECRUIT": {
-			const targetNodeId = action.targetNodeId;
-
-			// Only allow recruiting if the player has enough energy
-			if (state.player.energy < 2) {
-				return state;
-			}
-
-			console.log(`[RECRUIT] Attempting to recruit node ${targetNodeId}`);
-
-			// Calculate recruitment chance based on player stats
-			// Recruiting power has the strongest effect
-			let baseChance =
-				BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.06; // Changed from 0.04
-			// Charisma no longer affects recruitment success
-			// Money provides a smaller boost
-			baseChance += state.player.money * MONEY_RECRUITMENT_FACTOR;
-			// Smaller base bonus
-			baseChance += 0.01; // Reduced from 0.02
-
-			// Cap at 65%
-			const recruitmentChance = Math.min(baseChance, 0.65); // Reduced from 0.75
-
-			// Add to pending recruits for processing at day cycle
-			const pendingRecruits = [
-				...state.pendingRecruits,
-				{
-					nodeId: targetNodeId,
-					chance: recruitmentChance,
-				},
-			];
-
-			console.log(
-				`[RECRUIT] Recruitment chance: ${Math.round(recruitmentChance * 100)}% (RecruitingPower: ${state.player.recruitingPower}, Money: $${state.player.money})`,
-			);
-			console.log(
-				`[RECRUIT] pendingRecruits updated. Current count: ${pendingRecruits.length}`,
-			);
-			console.debug("[RECRUIT] Pending recruits:", pendingRecruits);
-
-			return {
-				...state,
-				player: {
-					...state.player,
-					energy: state.player.energy - 2,
-				},
-				pendingRecruits,
 			};
 		}
 

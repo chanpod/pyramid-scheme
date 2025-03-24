@@ -23,7 +23,7 @@ interface ActionPanelProps {
 	playerStats: PlayerStats;
 	gameDay: number;
 	gameHour: number;
-	pendingRecruits: { nodeId: string; chance: number }[];
+	// pendingRecruits: { nodeId: string; chance: number }[];
 	products: Product[];
 	marketingEvents: MarketingEvent[];
 }
@@ -638,7 +638,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 	playerStats,
 	gameDay,
 	gameHour,
-	pendingRecruits,
+	// pendingRecruits: { nodeId: string; chance: number }[],
 	products,
 	marketingEvents,
 }) => {
@@ -902,13 +902,11 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 			{/* Host an Event Button */}
 			<EventButton
 				onClick={() => setShowEventDialog(true)}
-				isEmergency={pendingRecruits.length === 0}
+				isEmergency={false}
 				disabled={playerStats.isResting || isMarketingEventRunning()}
 			>
 				<EventIcon>📣</EventIcon>
-				{pendingRecruits.length === 0
-					? "Find New Recruits (Critical)"
-					: "Host a Recruitment Event"}
+				Host a Recruitment Event
 				{isMarketingEventRunning() && (
 					<StatusTag isPositive={false}>Event in Progress</StatusTag>
 				)}
@@ -1279,7 +1277,8 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 				</div>
 			</InventorySection>
 
-			{pendingRecruits.length > 0 && (
+			{/* Pending Recruits Info */}
+			{/* pendingRecruits.length > 0 && (
 				<PendingRecruitsInfo>
 					<InfoTitle>Pending Recruitment Attempts</InfoTitle>
 					{pendingRecruits.map((recruit) => (
@@ -1292,7 +1291,7 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 						</PendingRecruitItem>
 					))}
 				</PendingRecruitsInfo>
-			)}
+			)} */}
 		</PanelContainer>
 	);
 };

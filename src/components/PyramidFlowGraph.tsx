@@ -28,7 +28,6 @@ interface PyramidFlowGraphProps {
 	onNodeClick: (nodeId: string) => void;
 	selectedNodeId?: string;
 	canMoveUp?: boolean;
-	canRecruit?: boolean;
 	playerStats?: any;
 	dispatch?: any;
 	products?: Product[];
@@ -93,7 +92,6 @@ const PyramidFlowInner = ({
 	onNodeClick,
 	selectedNodeId,
 	canMoveUp,
-	canRecruit,
 	playerStats,
 	dispatch,
 	products,
@@ -164,44 +162,41 @@ const PyramidFlowInner = ({
 		// Map to track position of nodes in each level
 		const levelPositions: Record<number, number> = {};
 
-		return sortedNodes
-			.filter((node) => !node.isPotentialRecruit) // Filter out potential recruits
-			.map((node) => {
-				// Get or initialize position counter for this level
-				levelPositions[node.level] = levelPositions[node.level] || 0;
+		return sortedNodes.map((node) => {
+			// Get or initialize position counter for this level
+			levelPositions[node.level] = levelPositions[node.level] || 0;
 
-				// Calculate position within level
-				const nodesInLevel = levelCounts[node.level];
-				const levelIndex = levelPositions[node.level]++;
+			// Calculate position within level
+			const nodesInLevel = levelCounts[node.level];
+			const levelIndex = levelPositions[node.level]++;
 
-				// Calculate level width (gets wider as we go down)
-				// Top level (level 1) is narrow, bottom level is full width
-				const levelWidthRatio = node.level / maxLevel;
-				const levelWidth =
-					topLevelWidth + (pyramidWidth - topLevelWidth) * levelWidthRatio;
+			// Calculate level width (gets wider as we go down)
+			// Top level (level 1) is narrow, bottom level is full width
+			const levelWidthRatio = node.level / maxLevel;
+			const levelWidth =
+				topLevelWidth + (pyramidWidth - topLevelWidth) * levelWidthRatio;
 
-				// For single node levels (like level 1), center it
-				const spacing = levelWidth / (nodesInLevel + 1);
+			// For single node levels (like level 1), center it
+			const spacing = levelWidth / (nodesInLevel + 1);
 
-				// Position X: start from center and spread nodes evenly within level width
-				const x =
-					pyramidWidth / 2 - levelWidth / 2 + spacing * (levelIndex + 1);
+			// Position X: start from center and spread nodes evenly within level width
+			const x = pyramidWidth / 2 - levelWidth / 2 + spacing * (levelIndex + 1);
 
-				// Position Y: top to bottom
-				const y = node.level * levelHeight;
+			// Position Y: top to bottom
+			const y = node.level * levelHeight;
 
-				// Create React Flow node
-				return {
-					id: node.id,
-					type: "pyramidNode",
-					position: { x, y },
-					data: {
-						...node,
-						isSelected: node.id === selectedNodeId,
-						onClick: () => handleNodeClick(node.id, { x, y }),
-					},
-				};
-			});
+			// Create React Flow node
+			return {
+				id: node.id,
+				type: "pyramidNode",
+				position: { x, y },
+				data: {
+					...node,
+					isSelected: node.id === selectedNodeId,
+					onClick: () => handleNodeClick(node.id, { x, y }),
+				},
+			};
+		});
 	}, [pyramid.nodes, selectedNodeId, handleNodeClick]);
 
 	// Find the player node to center the view
@@ -313,10 +308,6 @@ const PyramidFlowInner = ({
 						<div>
 							AI Owned: {pyramid.nodes.filter((n) => n.aiControlled).length}
 						</div>
-						<div>
-							Potential Recruits:{" "}
-							{pyramid.nodes.filter((n) => n.isPotentialRecruit).length}
-						</div>
 						<div>Levels: {Math.max(...pyramid.nodes.map((n) => n.level))}</div>
 					</StatsOverlay>
 				</Panel>
@@ -355,7 +346,6 @@ const PyramidFlowInner = ({
 						position={popoverPosition}
 						onClose={() => setShowPopover(false)}
 						canMoveUp={canMoveUp}
-						canRecruit={canRecruit}
 						playerStats={playerStats}
 						dispatch={dispatch}
 						products={products}

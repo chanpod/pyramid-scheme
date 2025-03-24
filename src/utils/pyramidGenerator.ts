@@ -131,19 +131,20 @@ export const generatePyramid = (
 	const nodes: PyramidNode[] = [];
 	const links: PyramidLink[] = [];
 
-	// Create a set number of nodes at each level
+	// Create a set number of nodes at each level with better horizontal distribution
 	for (let level = 1; level <= numLevels; level++) {
-		// Top level has few nodes, more nodes at lower levels
-		const numNodesAtLevel = Math.max(1, Math.floor(level * 1.5));
+		// More consistent node distribution - use an odd number for better centering
+		const nodesPerLevel = Math.max(
+			level === 1 ? 1 : 3, // At least 3 nodes per level (except top)
+			Math.floor(level * 1.8) | 1, // Make it odd for better centering (using bitwise OR with 1)
+		);
 
-		for (let i = 0; i < numNodesAtLevel; i++) {
-			const isPlayerNode =
-				level === playerStartLevel && i === Math.floor(numNodesAtLevel / 2);
+		for (let i = 0; i < nodesPerLevel; i++) {
 			nodes.push({
 				id: createId(),
 				level,
-				isPlayerPosition: isPlayerNode,
-				ownedByPlayer: isPlayerNode, // Player starts owning their node
+				isPlayerPosition: false, // Default to false, will be set later
+				ownedByPlayer: false, // Default to false, will be set later
 				money: level * 10, // Nodes at higher levels are worth more
 				recruits: 0,
 				inventory: {}, // Initialize empty inventory
@@ -155,8 +156,8 @@ export const generatePyramid = (
 	// Sort nodes by level for easier processing
 	const sortedNodes = [...nodes].sort((a, b) => a.level - b.level);
 
-	// Create a simple pyramid where each node connects to exactly one node above
-	// Start from level 2 (since level 1 is the top and has no parent)
+	// Create a more balanced pyramid where connections are more evenly distributed
+	// but with some randomness to create a more natural structure
 	for (let level = 2; level <= numLevels; level++) {
 		// Get nodes at current level
 		const nodesAtLevel = sortedNodes.filter((node) => node.level === level);
@@ -166,19 +167,27 @@ export const generatePyramid = (
 		// Make sure there's at least one node above to connect to
 		if (nodesAbove.length > 0) {
 			// For each node at this level, connect to exactly one node above
-			for (const node of nodesAtLevel) {
-				// Calculate which node above to connect to
-				// This distributes nodes more evenly across the pyramid
-				const targetNodeIndex = Math.min(
-					Math.floor(
-						(nodesAbove.length * nodesAtLevel.indexOf(node)) /
-							nodesAtLevel.length,
-					),
+			for (let i = 0; i < nodesAtLevel.length; i++) {
+				const node = nodesAtLevel[i];
+
+				// Calculate a preferred index in upper level based on relative position
+				const relativePosition = i / (nodesAtLevel.length - 1 || 1);
+				const preferredIndex = Math.min(
+					Math.floor(relativePosition * nodesAbove.length),
 					nodesAbove.length - 1,
 				);
-				const targetNode = nodesAbove[targetNodeIndex];
 
-				// Create single upward connection
+				// Add some randomness to the target selection
+				// For a more organic structure - can vary by +/- 1 position if possible
+				const randomOffset = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+				let targetIndex = preferredIndex + randomOffset;
+
+				// Make sure the target index is within bounds
+				targetIndex = Math.max(0, Math.min(targetIndex, nodesAbove.length - 1));
+
+				const targetNode = nodesAbove[targetIndex];
+
+				// Create upward connection
 				links.push({
 					source: node.id, // Current node (lower level) is source
 					target: targetNode.id, // Node above is target
@@ -187,12 +196,14 @@ export const generatePyramid = (
 		}
 	}
 
-	// Calculate node positions level by level
+	// Calculate node positions level by level with even spacing
 	const levelWidth = 800;
 	let positionedNodes: PyramidNode[] = [];
 
 	for (let level = 1; level <= numLevels; level++) {
 		const nodesInLevel = sortedNodes.filter((node) => node.level === level);
+
+		// Position nodes with equal spacing
 		const positionedNodesInLevel = calculateNodePositions(
 			nodesInLevel,
 			level,
