@@ -73,6 +73,22 @@ const MoneyPill = styled.div`
   white-space: nowrap;
 `;
 
+const InventoryPill = styled.div`
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid #aaa;
+  border-radius: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: bold;
+  z-index: 3;
+  white-space: nowrap;
+  color: #333;
+`;
+
 export const CustomNode = memo(({ data }: NodeProps<CustomNodeData>) => {
 	// Determine node color based on status
 	const getNodeColor = (): string => {
@@ -97,8 +113,22 @@ export const CustomNode = memo(({ data }: NodeProps<CustomNodeData>) => {
 		return `$${data.money}`;
 	};
 
+	// Get inventory information
+	const getInventoryDisplay = (): string => {
+		if (!data.inventory) return "";
+
+		const totalItems = Object.values(data.inventory).reduce(
+			(sum, qty) => sum + qty,
+			0,
+		);
+		if (totalItems === 0) return "";
+
+		return `${totalItems}/${data.maxInventory}`;
+	};
+
 	const isPlayer = data.isPlayerPosition;
 	const color = getNodeColor();
+	const inventoryInfo = getInventoryDisplay();
 
 	return (
 		<NodeContainer
@@ -121,6 +151,11 @@ export const CustomNode = memo(({ data }: NodeProps<CustomNodeData>) => {
 
 			{/* Node shadow for 3D effect */}
 			<NodeShadow isPlayer={isPlayer} />
+
+			{/* Show inventory information for owned nodes */}
+			{data.ownedByPlayer && inventoryInfo && (
+				<InventoryPill>📦 {inventoryInfo}</InventoryPill>
+			)}
 
 			{/* Main node circle */}
 			<NodeCircle

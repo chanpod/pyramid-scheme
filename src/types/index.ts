@@ -12,6 +12,9 @@ export interface PyramidNode {
 	aiStrategy?: string; // Strategy type for AI players
 	lastUpdated?: number; // Timestamp for tracking changes
 	isPotentialRecruit?: boolean; // Flag to indicate if this node is a potential recruit not yet in the pyramid
+	inventory?: { [productId: string]: number }; // Product inventory counts
+	maxInventory: number; // Maximum inventory capacity
+	lastRestocked?: number; // Timestamp for when this node was last restocked
 }
 
 export interface PyramidLink {
@@ -25,6 +28,30 @@ export interface PyramidGraph {
 	version: number; // Version counter for tracking changes to the graph structure
 }
 
+// Interface for products to sell in MLM system
+export interface Product {
+	id: string;
+	name: string;
+	baseCost: number; // Cost to buy from upstream
+	basePrice: number; // Price when selling to random people
+	downsellPrice: number; // Discounted price when selling to downstreams
+	baseChance: number; // Base chance to successfully sell to random person
+}
+
+// Marketing event interface for time-based events
+export interface MarketingEvent {
+	id: string;
+	type: "social-media" | "home-party" | "workshop";
+	purpose: "cash" | "recruitment"; // Whether this event generates cash or recruits
+	name: string;
+	remainingHours: number;
+	totalHours: number;
+	successChance: number;
+	baseReward: { min: number; max: number };
+	maxAttempts: number;
+	investmentAmount?: number; // Optional additional money invested to boost success
+}
+
 export interface PlayerStats {
 	money: number;
 	recruits: number;
@@ -36,6 +63,9 @@ export interface PlayerStats {
 	reputation: number;
 	isResting: boolean;
 	restUntil: number;
+	inventory: { [productId: string]: number }; // Product inventory counts
+	totalSalesRandom: number; // Total lifetime sales to random people
+	totalSalesDownstream: number; // Total lifetime sales to downstreams
 }
 
 export interface GameState {
@@ -49,6 +79,8 @@ export interface GameState {
 	isWinner: boolean;
 	pendingRecruits: { nodeId: string; chance: number }[];
 	lastDailyEnergyBonus: number; // Timestamp of when the last daily energy bonus was given
+	products: Product[]; // Available products in the game
+	marketingEvents: MarketingEvent[]; // Active marketing events
 }
 
 export type GameAction =
@@ -60,4 +92,24 @@ export type GameAction =
 	| { type: "UPGRADE_ENERGY" }
 	| { type: "REST"; hours: number }
 	| { type: "ADVANCE_TIME"; hours: number }
-	| { type: "RESET_GAME" };
+	| { type: "RESET_GAME" }
+	| {
+			type: "NETWORK_MARKETING";
+			intensity: "light" | "medium" | "aggressive";
+			purpose?: "cash" | "recruitment";
+			eventName?: string;
+			investmentAmount?: number;
+	  }
+	| { type: "BUY_PRODUCT"; productId: string; quantity: number }
+	| {
+			type: "SELL_DOWNSTREAM";
+			productId: string;
+			targetNodeId: string;
+			quantity: number;
+	  }
+	| {
+			type: "RESTOCK_DOWNSTREAM";
+			targetNodeId: string;
+			productId: string;
+			quantity: number;
+	  };

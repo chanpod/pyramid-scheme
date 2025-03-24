@@ -16,6 +16,7 @@ import type {
 	PyramidGraph as PyramidGraphType,
 	PyramidNode,
 	PyramidLink,
+	Product,
 } from "../types";
 import "reactflow/dist/style.css";
 import { CustomNode } from "./nodes/CustomNode";
@@ -30,6 +31,7 @@ interface PyramidFlowGraphProps {
 	canRecruit?: boolean;
 	playerStats?: any;
 	dispatch?: any;
+	products?: Product[];
 }
 
 const GraphContainer = styled.div`
@@ -94,6 +96,7 @@ const PyramidFlowInner = ({
 	canRecruit,
 	playerStats,
 	dispatch,
+	products,
 }: PyramidFlowGraphProps) => {
 	const reactFlowInstance = useReactFlow();
 	const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
@@ -355,6 +358,7 @@ const PyramidFlowInner = ({
 						canRecruit={canRecruit}
 						playerStats={playerStats}
 						dispatch={dispatch}
+						products={products}
 					/>
 				)}
 			</ReactFlow>

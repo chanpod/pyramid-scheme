@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import styled from "styled-components";
-import { PyramidNode } from "../types";
+import { PyramidNode, Product } from "../types";
 
 interface NodePopoverProps {
 	node: PyramidNode;
@@ -10,6 +10,7 @@ interface NodePopoverProps {
 	canRecruit?: boolean;
 	playerStats?: any;
 	dispatch?: any;
+	products?: Product[];
 }
 
 const PopoverContainer = styled.div<{ x: number; y: number }>`
@@ -126,6 +127,93 @@ const StatusTag = styled.span<{ isPositive?: boolean }>`
   margin-left: 5px;
 `;
 
+const InventorySection = styled.div`
+  margin-top: 15px;
+  border-top: 1px solid #eee;
+  padding-top: 10px;
+`;
+
+const InventoryTitle = styled.h4`
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #333;
+`;
+
+const ProductItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 13px;
+  padding: 5px;
+  border-radius: 4px;
+  background-color: #f5f5f5;
+`;
+
+const ProductName = styled.span`
+  color: #333;
+`;
+
+const ProductCount = styled.span<{ isEmpty?: boolean }>`
+  color: ${(props) => (props.isEmpty ? "#d32f2f" : "#388e3c")};
+  font-weight: 500;
+`;
+
+const Tabs = styled.div`
+  display: flex;
+  margin-top: 15px;
+  border-bottom: 1px solid #eee;
+`;
+
+const Tab = styled.div<{ active: boolean }>`
+  padding: 5px 10px;
+  margin-right: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  color: ${(props) => (props.active ? "#2196F3" : "#666")};
+  border-bottom: ${(props) => (props.active ? "2px solid #2196F3" : "none")};
+`;
+
+const QuantityControls = styled.div`
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+`;
+
+const QuantityButton = styled.button`
+  background-color: ${(props) => (props.disabled ? "#e0e0e0" : "#f0f0f0")};
+  border: 1px solid #ddd;
+  color: ${(props) => (props.disabled ? "#999" : "#333")};
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
+  font-weight: bold;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const QuantityInput = styled.input`
+  width: 40px;
+  height: 24px;
+  text-align: center;
+  margin: 0 5px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 12px;
+`;
+
+const ProductDropdown = styled.select`
+  width: 100%;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  margin-top: 5px;
+  font-size: 13px;
+`;
+
 const NodePopover: React.FC<NodePopoverProps> = ({
 	node,
 	position,
@@ -134,7 +222,12 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 	canRecruit,
 	playerStats,
 	dispatch,
+	products = [],
 }) => {
+	const [activeTab, setActiveTab] = useState("info");
+	const [selectedProduct, setSelectedProduct] = useState("");
+	const [quantity, setQuantity] = useState(1);
+
 	// Generate node title based on node properties
 	const getNodeTitle = () => {
 		if (node.isPlayerPosition) return "Your Position";
@@ -144,14 +237,16 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 	};
 
 	// Calculate required recruits to move up
-	const requiredRecruits = canMoveUp ? 7 - node.level : 0;
+	const requiredRecruits = canMoveUp ? Math.ceil((7 - node.level) * 1.5) : 0;
 
 	// Check if player can afford to recruit
-	const canAffordRecruit = playerStats && playerStats.money >= 60;
+	const canAffordRecruit = playerStats && playerStats.energy >= 2;
 
 	// Check if player has enough energy
-	const hasEnergyToRecruit = playerStats && playerStats.energy >= 1;
-	const hasEnergyToMoveUp = playerStats && playerStats.energy >= 10;
+	const hasEnergyToRecruit = playerStats && playerStats.energy >= 2;
+	const hasEnergyToMoveUp = playerStats && playerStats.energy >= 3;
+	const hasEnergyToSell = playerStats && playerStats.energy >= 1;
+	const hasEnergyToRestock = playerStats && playerStats.energy >= 1;
 
 	// Check if player has enough recruits to move up
 	const hasEnoughRecruits =
@@ -159,13 +254,7 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 
 	// Handle recruitment action
 	const handleRecruit = () => {
-		if (
-			dispatch &&
-			node &&
-			canRecruit &&
-			hasEnergyToRecruit &&
-			canAffordRecruit
-		) {
+		if (dispatch && node && canRecruit && hasEnergyToRecruit) {
 			dispatch({
 				type: "RECRUIT",
 				targetNodeId: node.id,
@@ -191,6 +280,97 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 		}
 	};
 
+	// Handle sell to downstream
+	const handleSellToDownstream = () => {
+		if (!selectedProduct || quantity <= 0 || !hasEnergyToSell) return;
+
+		// Check if player has enough inventory
+		const playerInventory = playerStats?.inventory || {};
+		const playerQuantity = playerInventory[selectedProduct] || 0;
+
+		if (playerQuantity < quantity) {
+			console.log("Not enough product in inventory");
+			return;
+		}
+
+		// Check if node has enough capacity
+		const nodeInventory = node.inventory || {};
+		const nodeCurrentQuantity = nodeInventory[selectedProduct] || 0;
+		const totalNodeInventory = Object.values(nodeInventory).reduce(
+			(sum, qty) => sum + qty,
+			0,
+		);
+		const availableCapacity =
+			node.maxInventory - totalNodeInventory + nodeCurrentQuantity;
+
+		if (quantity > availableCapacity) {
+			console.log("Not enough capacity in downstream node");
+			return;
+		}
+
+		dispatch({
+			type: "SELL_DOWNSTREAM",
+			targetNodeId: node.id,
+			productId: selectedProduct,
+			quantity,
+		});
+
+		setQuantity(1);
+		onClose();
+	};
+
+	// Handle restock downstream
+	const handleRestockDownstream = () => {
+		if (!selectedProduct || quantity <= 0 || !hasEnergyToRestock) return;
+
+		// Get product price
+		const product = products.find((p) => p.id === selectedProduct);
+		if (!product) return;
+
+		// Check if player has enough money
+		const totalCost = product.downsellPrice * quantity;
+		if (playerStats.money < totalCost) {
+			console.log("Not enough money to restock");
+			return;
+		}
+
+		// Check if node has enough capacity
+		const nodeInventory = node.inventory || {};
+		const nodeCurrentQuantity = nodeInventory[selectedProduct] || 0;
+		const totalNodeInventory = Object.values(nodeInventory).reduce(
+			(sum, qty) => sum + qty,
+			0,
+		);
+		const availableCapacity =
+			node.maxInventory - totalNodeInventory + nodeCurrentQuantity;
+
+		if (quantity > availableCapacity) {
+			console.log("Not enough capacity in downstream node");
+			return;
+		}
+
+		dispatch({
+			type: "RESTOCK_DOWNSTREAM",
+			targetNodeId: node.id,
+			productId: selectedProduct,
+			quantity,
+		});
+
+		setQuantity(1);
+		onClose();
+	};
+
+	// Calculate available space in node inventory
+	const calculateAvailableSpace = () => {
+		const totalItems = Object.values(node.inventory || {}).reduce(
+			(sum, qty) => sum + qty,
+			0,
+		);
+		return node.maxInventory - totalItems;
+	};
+
+	const availableSpace = calculateAvailableSpace();
+
 	return (
 		<PopoverContainer x={position.x} y={position.y}>
 			<PopoverHeader>
@@ -198,65 +378,192 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 				<CloseButton onClick={onClose}>×</CloseButton>
 			</PopoverHeader>
 
-			<InfoRow>
-				<Label>Level:</Label>
-				<Value>{node.level}</Value>
-			</InfoRow>
-
-			<InfoRow>
-				<Label>Recruits:</Label>
-				<Value>{node.recruits}</Value>
-			</InfoRow>
-
-			<InfoRow>
-				<Label>Money:</Label>
-				<Value>${node.money}</Value>
-			</InfoRow>
-
-			<InfoRow>
-				<Label>Status:</Label>
-				<Value>
-					{node.ownedByPlayer
-						? "Owned by You"
-						: node.aiControlled
-							? "Owned by Another Player"
-							: "Not Owned"}
-				</Value>
-			</InfoRow>
-
-			{/* Actions based on node state */}
-			{canRecruit && !node.ownedByPlayer && !node.aiControlled && dispatch && (
-				<ActionButton
-					primary
-					disabled={!hasEnergyToRecruit || !canAffordRecruit}
-					onClick={handleRecruit}
-				>
-					<ActionIcon>👥</ActionIcon> Recruit This Person
-					{!hasEnergyToRecruit && (
-						<StatusTag isPositive={false}>No Energy</StatusTag>
+			{node.ownedByPlayer && (
+				<Tabs>
+					<Tab
+						active={activeTab === "info"}
+						onClick={() => setActiveTab("info")}
+					>
+						Info
+					</Tab>
+					<Tab
+						active={activeTab === "inventory"}
+						onClick={() => setActiveTab("inventory")}
+					>
+						Inventory
+					</Tab>
+					{!node.isPlayerPosition && (
+						<Tab
+							active={activeTab === "sell"}
+							onClick={() => setActiveTab("sell")}
+						>
+							Sell/Restock
+						</Tab>
 					)}
-					{!canAffordRecruit && (
-						<StatusTag isPositive={false}>Need $60</StatusTag>
-					)}
-				</ActionButton>
+				</Tabs>
 			)}
 
-			{canMoveUp && dispatch && (
-				<ActionButton
-					primary
-					disabled={!hasEnoughRecruits || !hasEnergyToMoveUp}
-					onClick={handleMoveUp}
-				>
-					<ActionIcon>⬆️</ActionIcon> Move Up Here
-					{!hasEnoughRecruits && (
-						<StatusTag isPositive={false}>
-							Need {requiredRecruits} Recruits
-						</StatusTag>
+			{activeTab === "info" && (
+				<>
+					<InfoRow>
+						<Label>Level:</Label>
+						<Value>{node.level}</Value>
+					</InfoRow>
+
+					<InfoRow>
+						<Label>Recruits:</Label>
+						<Value>{node.recruits}</Value>
+					</InfoRow>
+
+					<InfoRow>
+						<Label>Money:</Label>
+						<Value>${node.money}</Value>
+					</InfoRow>
+
+					<InfoRow>
+						<Label>Status:</Label>
+						<Value>
+							{node.ownedByPlayer
+								? "Owned by You"
+								: node.aiControlled
+									? "Owned by Another Player"
+									: "Not Owned"}
+						</Value>
+					</InfoRow>
+
+					{node.ownedByPlayer && (
+						<InfoRow>
+							<Label>Inventory Space:</Label>
+							<Value>
+								{availableSpace} of {node.maxInventory} available
+							</Value>
+						</InfoRow>
 					)}
-					{!hasEnergyToMoveUp && (
-						<StatusTag isPositive={false}>Need 10 Energy</StatusTag>
+
+					{/* Actions based on node state */}
+					{canRecruit &&
+						!node.ownedByPlayer &&
+						!node.aiControlled &&
+						dispatch && (
+							<ActionButton
+								primary
+								disabled={!hasEnergyToRecruit}
+								onClick={handleRecruit}
+							>
+								<ActionIcon>👥</ActionIcon> Recruit This Person
+								{!hasEnergyToRecruit && (
+									<StatusTag isPositive={false}>No Energy</StatusTag>
+								)}
+							</ActionButton>
+						)}
+
+					{canMoveUp && dispatch && (
+						<ActionButton
+							primary
+							disabled={!hasEnoughRecruits || !hasEnergyToMoveUp}
+							onClick={handleMoveUp}
+						>
+							<ActionIcon>⬆️</ActionIcon> Move Up Here
+							{!hasEnoughRecruits && (
+								<StatusTag isPositive={false}>
+									Need {requiredRecruits} Recruits
+								</StatusTag>
+							)}
+							{!hasEnergyToMoveUp && (
+								<StatusTag isPositive={false}>Need Energy</StatusTag>
+							)}
+						</ActionButton>
 					)}
-				</ActionButton>
+				</>
+			)}
+
+			{activeTab === "inventory" && node.ownedByPlayer && (
+				<InventorySection>
+					<InventoryTitle>Current Inventory</InventoryTitle>
+					{products.map((product) => {
+						const quantity = node.inventory?.[product.id] || 0;
+						return (
+							<ProductItem key={product.id}>
+								<ProductName>{product.name}</ProductName>
+								<ProductCount isEmpty={quantity === 0}>{quantity}</ProductCount>
+							</ProductItem>
+						);
+					})}
+
+					<InfoRow style={{ marginTop: 10 }}>
+						<Label>Total Items:</Label>
+						<Value>
+							{Object.values(node.inventory || {}).reduce(
+								(sum, qty) => sum + qty,
+								0,
+							)}{" "}
+							/ {node.maxInventory}
+						</Value>
+					</InfoRow>
+				</InventorySection>
+			)}
+
+			{activeTab === "sell" && node.ownedByPlayer && !node.isPlayerPosition && (
+				<InventorySection>
+					<InventoryTitle>Sell or Restock</InventoryTitle>
+
+					<ProductDropdown
+						value={selectedProduct}
+						onChange={(e) => setSelectedProduct(e.target.value)}
+					>
+						<option value="">Select a product</option>
+						{products.map((product) => (
+							<option key={product.id} value={product.id}>
+								{product.name} - ${product.downsellPrice}
+							</option>
+						))}
+					</ProductDropdown>
+
+					{selectedProduct && (
+						<>
+							<QuantityControls>
+								<QuantityButton
+									onClick={() => setQuantity(Math.max(1, quantity - 1))}
+									disabled={quantity <= 1}
+								>
+									-
+								</QuantityButton>
+								<QuantityInput
+									type="number"
+									min="1"
+									value={quantity}
+									onChange={(e) =>
+										setQuantity(Math.max(1, parseInt(e.target.value) || 1))
+									}
+								/>
+								<QuantityButton onClick={() => setQuantity(quantity + 1)}>
+									+
+								</QuantityButton>
+							</QuantityControls>
+
+							<ActionButton
+								onClick={handleSellToDownstream}
+								disabled={!hasEnergyToSell || !selectedProduct}
+								style={{ marginBottom: 5 }}
+							>
+								<ActionIcon>💰</ActionIcon> Sell to Downstream
+								{!hasEnergyToSell && (
+									<StatusTag isPositive={false}>No Energy</StatusTag>
+								)}
+							</ActionButton>
+
+							<ActionButton
+								onClick={handleRestockDownstream}
+								disabled={!hasEnergyToRestock || !selectedProduct}
+							>
+								<ActionIcon>📦</ActionIcon> Restock Downstream
+								{!hasEnergyToRestock && (
+									<StatusTag isPositive={false}>No Energy</StatusTag>
+								)}
+							</ActionButton>
+						</>
+					)}
+				</InventorySection>
 			)}
 		</PopoverContainer>
 	);

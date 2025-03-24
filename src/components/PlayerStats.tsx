@@ -225,6 +225,31 @@ const Tooltip = styled.div`
   }
 `;
 
+const RestButton = styled.button<{ disabled?: boolean }>`
+	background-color: ${(props) => (props.disabled ? "#e0e0e0" : "#ff9800")};
+	color: white;
+	font-size: 12px;
+	padding: 4px 8px;
+	border: none;
+	border-radius: 4px;
+	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
+	margin-left: 10px;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	
+	&:hover {
+		background-color: ${(props) => (props.disabled ? "#e0e0e0" : "#f57c00")};
+		transform: ${(props) => (props.disabled ? "none" : "translateY(-2px)")};
+	}
+`;
+
+const RestIcon = styled.span`
+	margin-right: 5px;
+	font-size: 12px;
+`;
+
 const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 	stats,
 	lastDailyEnergyBonus,
@@ -250,6 +275,25 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 		? getNodesBelow(pyramid, playerNodeId).filter((node) => !node.ownedByPlayer)
 				.length
 		: 0;
+
+	// Calculate rest duration based on current energy
+	const calculateRestDuration = () => {
+		if (stats.energy <= 0) {
+			return 10; // Maximum rest for 0 energy
+		}
+
+		// Calculate rest duration inversely proportional to energy level
+		// Higher energy = shorter rest, lower energy = longer rest
+		const energyRatio = stats.energy / MAX_ENERGY;
+		const baseDuration = 10 - energyRatio * 6; // Scale from 4-10 based on energy
+		return Math.ceil(baseDuration);
+	};
+
+	// Handle rest action
+	const handleRest = () => {
+		const restHours = calculateRestDuration();
+		dispatch({ type: "REST", hours: restHours });
+	};
 
 	// Show energy bonus notification if the bonus was given less than 5 seconds ago
 	useEffect(() => {
@@ -307,20 +351,43 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 				</StatItem>
 
 				<StatItem>
-					<StatLabel>
-						<div>
-							<StatIcon>⚡</StatIcon>Energy
-						</div>
-						{!isMaxEnergy && (
-							<Tooltip data-tooltip={`Upgrade Energy: $${energyCost}`}>
-								<UpgradeButton
-									disabled={stats.isResting || !canAffordEnergy || isMaxEnergy}
-									onClick={() => dispatch({ type: "UPGRADE_ENERGY" })}
+					<StatLabel style={{ marginBottom: "8px" }}>
+						<div
+							style={{ display: "flex", alignItems: "center", width: "100%" }}
+						>
+							<div style={{ display: "flex", alignItems: "center" }}>
+								<StatIcon>⚡</StatIcon>Energy
+							</div>
+							<div
+								style={{
+									marginLeft: "auto",
+									display: "flex",
+									alignItems: "center",
+								}}
+							>
+								<RestButton
+									disabled={stats.isResting}
+									onClick={handleRest}
+									title={`Rest for ${calculateRestDuration()} hours to recover energy`}
 								>
-									+
-								</UpgradeButton>
-							</Tooltip>
-						)}
+									<RestIcon>🛌</RestIcon>
+									Rest ({calculateRestDuration()}h)
+								</RestButton>
+								{!isMaxEnergy && (
+									<Tooltip data-tooltip={`Upgrade Energy: $${energyCost}`}>
+										<UpgradeButton
+											disabled={
+												stats.isResting || !canAffordEnergy || isMaxEnergy
+											}
+											onClick={() => dispatch({ type: "UPGRADE_ENERGY" })}
+											style={{ marginLeft: "5px" }}
+										>
+											+
+										</UpgradeButton>
+									</Tooltip>
+								)}
+							</div>
+						</div>
 					</StatLabel>
 					<StatValue>
 						<span>

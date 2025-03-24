@@ -1,10 +1,22 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import styled from "styled-components";
-import { GameAction, PlayerStats } from "../types";
+import { GameAction, PlayerStats, Product, MarketingEvent } from "../types";
 
 // Define constants here to match the ones in useGameState.ts
 const ENERGY_COST = 800;
 const MAX_ENERGY = 20;
+const PRODUCT_BUY_ENERGY_COST = 5;
+
+// Marketing event durations
+const SOCIAL_MEDIA_DURATION = 24; // 24 hours (1 day)
+const HOME_PARTY_DURATION = 48; // 48 hours (2 days)
+const PUBLIC_WORKSHOP_DURATION = 168; // 168 hours (7 days)
+
+// Investment constants
+const MIN_INVESTMENT = 50;
+const MAX_INVESTMENT = 500;
+const INVESTMENT_SUCCESS_MULTIPLIER = 0.0005; // 0.05% per dollar invested
+const INVESTMENT_ATTEMPTS_MULTIPLIER = 0.002; // 0.2% per dollar invested
 
 interface ActionPanelProps {
 	dispatch: React.Dispatch<GameAction>;
@@ -12,6 +24,8 @@ interface ActionPanelProps {
 	gameDay: number;
 	gameHour: number;
 	pendingRecruits: { nodeId: string; chance: number }[];
+	products: Product[];
+	marketingEvents: MarketingEvent[];
 }
 
 const PanelContainer = styled.div`
@@ -21,6 +35,46 @@ const PanelContainer = styled.div`
 	padding: 20px;
 	margin-bottom: 20px;
 	min-height: 500px; /* Set minimum height to prevent UI jumping */
+	max-height: 90vh;
+	overflow-y: auto;
+`;
+
+const MoneyDisplay = styled.div`
+	background-color: #4CAF50;
+	color: white;
+	border-radius: 8px;
+	padding: 15px;
+	margin-bottom: 20px;
+	text-align: center;
+	font-weight: bold;
+	font-size: 22px;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+	position: relative;
+	overflow: hidden;
+	
+	&.flash {
+		animation: moneyFlash 0.6s ease-out;
+	}
+	
+	@keyframes moneyFlash {
+		0% {
+			background-color: #4CAF50;
+		}
+		50% {
+			background-color: #8BC34A;
+		}
+		100% {
+			background-color: #4CAF50;
+		}
+	}
+`;
+
+const MoneyIcon = styled.span`
+	margin-right: 10px;
+	font-size: 24px;
 `;
 
 const ActionButton = styled.button<{ disabled?: boolean; primary?: boolean }>`
@@ -62,9 +116,17 @@ const ActionIcon = styled.span`
 	font-size: 16px;
 `;
 
-const StatusTag = styled.span<{ isAffordable?: boolean }>`
-	background-color: ${(props) => (props.isAffordable ? "#e8f5e9" : "#ffebee")};
-	color: ${(props) => (props.isAffordable ? "#388e3c" : "#d32f2f")};
+const StatusTag = styled.span<{ isAffordable?: boolean; isPositive?: boolean }>`
+	background-color: ${(props) => {
+		if (props.isPositive) return "#e8f5e9";
+		if (props.isAffordable) return "#e8f5e9";
+		return "#ffebee";
+	}};
+	color: ${(props) => {
+		if (props.isPositive) return "#388e3c";
+		if (props.isAffordable) return "#388e3c";
+		return "#d32f2f";
+	}};
 	border-radius: 3px;
 	padding: 2px 6px;
 	font-size: 11px;
@@ -190,10 +252,385 @@ const GameActionCost = styled.div`
 `;
 
 const InfoTitle = styled.h3`
-	margin-top: 0;
-	margin-bottom: 10px;
-	color: #333;
 	font-size: 18px;
+	margin-bottom: 15px;
+	color: #333;
+	display: flex;
+	align-items: center;
+`;
+
+const InventorySection = styled.div`
+	margin: 20px 0;
+	background-color: #f9f9f9;
+	border-radius: 8px;
+	padding: 15px;
+`;
+
+const ProductCard = styled.div`
+	border: 1px solid #ddd;
+	border-radius: 6px;
+	padding: 10px;
+	margin-bottom: 10px;
+	background-color: white;
+`;
+
+const ProductHeader = styled.div`
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 5px;
+`;
+
+const ProductName = styled.h4`
+	margin: 0;
+	color: #333;
+`;
+
+const ProductQuantity = styled.div`
+	font-weight: bold;
+	color: ${(props) => (props.children && Number(props.children.toString().split(" ")[0]) > 0 ? "#388e3c" : "#d32f2f")};
+`;
+
+const ProductActions = styled.div`
+	display: flex;
+	flex-wrap: wrap;
+	margin-top: 10px;
+`;
+
+const ProductDetails = styled.div`
+	font-size: 13px;
+	color: #777;
+	margin: 5px 0;
+`;
+
+const QuantityControls = styled.div`
+	display: flex;
+	align-items: center;
+	margin-top: 8px;
+`;
+
+const QuantityButton = styled.button`
+	background-color: ${(props) => (props.disabled ? "#e0e0e0" : "#f0f0f0")};
+	border: 1px solid #ddd;
+	color: ${(props) => (props.disabled ? "#999" : "#333")};
+	width: 30px;
+	height: 30px;
+	border-radius: 3px;
+	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
+	font-weight: bold;
+	font-size: 14px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+`;
+
+const QuantityInput = styled.input`
+	width: 40px;
+	height: 30px;
+	text-align: center;
+	margin: 0 5px;
+	border: 1px solid #ddd;
+	border-radius: 3px;
+`;
+
+const NetworkMarketingSection = styled.div`
+	margin-bottom: 20px;
+`;
+
+const SectionTitle = styled.h2`
+	margin-top: 0;
+	margin-bottom: 15px;
+	color: #333;
+	font-size: 24px;
+`;
+
+const SectionDescription = styled.p`
+	margin: 0;
+	color: #666;
+	font-size: 14px;
+`;
+
+const MarketingDetails = styled.div`
+	margin-top: 10px;
+`;
+
+const MarketingDetailItem = styled.div`
+	margin-bottom: 5px;
+`;
+
+const DetailLabel = styled.span`
+	font-weight: bold;
+	margin-right: 5px;
+`;
+
+const PanelTitle = styled.h2`
+	margin-top: 0;
+	margin-bottom: 15px;
+	color: #333;
+	font-size: 24px;
+`;
+
+const PanelTitleIcon = styled.span`
+	margin-right: 8px;
+	font-size: 16px;
+`;
+
+const SectionTitleIcon = styled.span`
+	margin-right: 8px;
+	font-size: 16px;
+`;
+
+const EventButton = styled.button<{
+	isEmergency?: boolean;
+	disabled?: boolean;
+}>`
+	background-color: ${(props) => {
+		if (props.disabled) return "#e0e0e0";
+		if (props.isEmergency) return "#d32f2f";
+		return "#2196F3";
+	}};
+	color: ${(props) => {
+		if (props.disabled) return "#999";
+		if (props.isEmergency) return "white";
+		return "white";
+	}};
+	border: ${(props) => (props.disabled ? "1px solid #ddd" : "none")};
+	border-radius: 4px;
+	padding: 10px 15px;
+	font-weight: bold;
+	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
+	margin-right: 10px;
+	margin-bottom: 10px;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	
+	&:hover {
+		background-color: ${(props) => {
+			if (props.disabled) return "#e0e0e0";
+			if (props.isEmergency) return "#c62323";
+			return "#1976D2";
+		}};
+		transform: ${(props) => (props.disabled ? "none" : "translateY(-2px)")};
+		box-shadow: ${(props) => (props.disabled ? "none" : "0 4px 8px rgba(0, 0, 0, 0.1)")};
+	}
+`;
+
+const EventIcon = styled.span`
+	margin-right: 8px;
+	font-size: 16px;
+`;
+
+const EventDialogOverlay = styled.div`
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-color: rgba(0, 0, 0, 0.5);
+	display: flex;
+	justify-content: center;
+	align-items: center;
+`;
+
+const EventDialog = styled.div`
+	background-color: white;
+	border-radius: 8px;
+	padding: 20px;
+	max-width: 400px;
+	width: 100%;
+`;
+
+const DialogTitle = styled.h2`
+	margin-top: 0;
+	margin-bottom: 15px;
+	color: #333;
+	font-size: 24px;
+`;
+
+const DialogDescription = styled.p`
+	margin-bottom: 20px;
+	color: #666;
+	font-size: 14px;
+`;
+
+const EventOption = styled.div`
+	padding: 10px;
+	border-bottom: 1px solid #ddd;
+	cursor: pointer;
+	transition: all 0.2s;
+	
+	&:hover {
+		background-color: #e8f4fd;
+	}
+`;
+
+const EventOptionTitle = styled.h4`
+	margin-top: 0;
+	margin-bottom: 8px;
+	color: #333;
+	display: flex;
+	align-items: center;
+`;
+
+const EventOptionDescription = styled.p`
+	margin: 0;
+	color: #666;
+	font-size: 14px;
+`;
+
+const CloseButton = styled.button`
+	background-color: #f44336;
+	color: white;
+	border: none;
+	border-radius: 4px;
+	padding: 10px 15px;
+	font-weight: bold;
+	cursor: pointer;
+	margin-top: 10px;
+`;
+
+const ActiveEventBanner = styled.div`
+	background: linear-gradient(to right, #FF9800, #F57C00);
+	color: white;
+	border-radius: 8px;
+	padding: 15px;
+	margin-bottom: 15px;
+	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+	position: relative;
+	overflow: hidden;
+	animation: pulse 1.5s infinite;
+	
+	@keyframes pulse {
+		0% {
+			box-shadow: 0 4px 8px rgba(245, 124, 0, 0.4);
+		}
+		50% {
+			box-shadow: 0 4px 12px rgba(245, 124, 0, 0.7);
+		}
+		100% {
+			box-shadow: 0 4px 8px rgba(245, 124, 0, 0.4);
+		}
+	}
+	
+	&::after {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: linear-gradient(45deg, rgba(255,255,255,0.1) 25%, transparent 25%, 
+							transparent 50%, rgba(255,255,255,0.1) 50%, 
+							rgba(255,255,255,0.1) 75%, transparent 75%, transparent);
+		background-size: 20px 20px;
+		animation: slide 20s linear infinite;
+		z-index: 1;
+	}
+	
+	@keyframes slide {
+		0% {
+			background-position: 0 0;
+		}
+		100% {
+			background-position: 1000px 0;
+		}
+	}
+`;
+
+const EventTitle = styled.div`
+	font-weight: bold;
+	font-size: 18px;
+	margin-bottom: 5px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	z-index: 2;
+	position: relative;
+`;
+
+const EventTimeRemaining = styled.div`
+	font-size: 14px;
+	font-weight: normal;
+	z-index: 2;
+	position: relative;
+`;
+
+const EventProgress = styled.div`
+	height: 6px;
+	background-color: rgba(255, 255, 255, 0.3);
+	border-radius: 3px;
+	margin-top: 10px;
+	overflow: hidden;
+	z-index: 2;
+	position: relative;
+`;
+
+const ProgressBar = styled.div<{ progress: number }>`
+	height: 100%;
+	width: ${(props) => props.progress}%;
+	background-color: rgba(255, 255, 255, 0.8);
+	border-radius: 3px;
+`;
+
+const TabContainer = styled.div`
+	display: flex;
+	margin-bottom: 15px;
+	border-bottom: 1px solid #ddd;
+`;
+
+const Tab = styled.div<{ active: boolean }>`
+	padding: 10px 20px;
+	cursor: pointer;
+	font-weight: ${(props) => (props.active ? "bold" : "normal")};
+	color: ${(props) => (props.active ? "#2196F3" : "#666")};
+	border-bottom: ${(props) => (props.active ? "2px solid #2196F3" : "none")};
+	transition: all 0.2s;
+	
+	&:hover {
+		color: #2196F3;
+	}
+`;
+
+const InvestmentContainer = styled.div`
+	margin: 15px 0;
+	padding: 15px;
+	background-color: #f5f5f5;
+	border-radius: 8px;
+`;
+
+const InvestmentLabel = styled.div`
+	font-weight: bold;
+	margin-bottom: 5px;
+	display: flex;
+	justify-content: space-between;
+`;
+
+const InvestmentAmount = styled.div`
+	font-weight: normal;
+	color: #2196F3;
+`;
+
+const InvestmentSlider = styled.input`
+	width: 100%;
+	margin: 10px 0;
+`;
+
+const InvestmentBenefits = styled.div`
+	margin-top: 10px;
+	font-size: 14px;
+	color: #666;
+`;
+
+const Benefit = styled.div`
+	margin-bottom: 5px;
+	display: flex;
+	align-items: center;
+`;
+
+const BenefitIcon = styled.span`
+	margin-right: 5px;
 `;
 
 const ActionPanel: React.FC<ActionPanelProps> = ({
@@ -202,7 +639,17 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 	gameDay,
 	gameHour,
 	pendingRecruits,
+	products,
+	marketingEvents,
 }) => {
+	const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
+	const [productQuantity, setProductQuantity] = useState(5);
+	const [showEventDialog, setShowEventDialog] = useState(false);
+	const [flashMoney, setFlashMoney] = useState(false);
+	const [prevMoney, setPrevMoney] = useState(playerStats.money);
+	const [activeTab, setActiveTab] = useState<"cash" | "recruitment">("cash");
+	const [investmentAmount, setInvestmentAmount] = useState(MIN_INVESTMENT);
+
 	// Format the recruitment chance as a percentage
 	const formatChance = (chance: number) => {
 		return `${Math.floor(chance * 100)}%`;
@@ -215,80 +662,676 @@ const ActionPanel: React.FC<ActionPanelProps> = ({
 		return `${displayHour}:00 ${period}`;
 	};
 
-	// Handle collect money action
-	const handleCollectMoney = () => {
-		if (playerStats.energy >= 1) {
-			dispatch({ type: "COLLECT_MONEY" });
+	// Format time remaining for events
+	const formatTimeRemaining = (hours: number) => {
+		if (hours >= 24) {
+			const days = Math.floor(hours / 24);
+			const remainingHours = hours % 24;
+			return `${days} day${days !== 1 ? "s" : ""} ${remainingHours} hour${remainingHours !== 1 ? "s" : ""}`;
+		}
+		return `${hours} hour${hours !== 1 ? "s" : ""}`;
+	};
+
+	// Get event icon based on type
+	const getEventIcon = (eventType: string) => {
+		switch (eventType) {
+			case "social-media":
+				return "📱";
+			case "home-party":
+				return "🏠";
+			case "workshop":
+				return "🎪";
+			default:
+				return "📊";
 		}
 	};
 
-	// Handle short rest action
-	const handleShortRest = () => {
-		dispatch({ type: "REST", hours: 8 });
+	// Effect to check if money has changed and trigger animation
+	useEffect(() => {
+		if (playerStats.money !== prevMoney) {
+			setFlashMoney(true);
+			setPrevMoney(playerStats.money);
+
+			// Remove flash class after animation completes
+			const timer = setTimeout(() => {
+				setFlashMoney(false);
+			}, 600);
+
+			return () => clearTimeout(timer);
+		}
+	}, [playerStats.money, prevMoney]);
+
+	// Handle buy product
+	const handleBuyProduct = (productId: string) => {
+		if (productQuantity <= 0) return;
+		dispatch({
+			type: "BUY_PRODUCT",
+			productId,
+			quantity: productQuantity,
+		});
+		setProductQuantity(5); // Reset to 5
 	};
 
-	// Handle long rest action
-	const handleLongRest = () => {
-		dispatch({ type: "REST", hours: 16 });
+	// Calculate success chance for selling product
+	const calculateSellChance = (productId: string) => {
+		const product = products.find((p) => p.id === productId);
+		if (!product) return 0;
+
+		// Base chance improved by charisma
+		return Math.min(0.95, product.baseChance + playerStats.charisma * 0.05);
+	};
+
+	// Calculate network marketing success chances
+	const calculateMarketingChance = (intensity: string) => {
+		let baseChance = 0;
+
+		switch (intensity) {
+			case "light":
+				baseChance = 0.5 + playerStats.charisma * 0.05;
+				break;
+			case "medium":
+				baseChance = 0.35 + playerStats.charisma * 0.06;
+				break;
+			case "aggressive":
+				baseChance = 0.2 + playerStats.charisma * 0.07;
+				break;
+		}
+
+		// Add reputation bonus
+		baseChance += playerStats.reputation * 0.02;
+
+		// Cap at 85%
+		return Math.min(0.85, baseChance);
+	};
+
+	// Calculate max attempts for network marketing
+	const calculateMaxAttempts = (intensity: string) => {
+		switch (intensity) {
+			case "light":
+				return 2 + Math.floor(playerStats.charisma / 2);
+			case "medium":
+				return 4 + Math.floor(playerStats.charisma / 2);
+			case "aggressive":
+				return 6 + Math.floor(playerStats.charisma / 2);
+			default:
+				return 0;
+		}
+	};
+
+	// Calculate the benefits of investment for recruiting
+	const calculateInvestmentBenefits = (amount: number) => {
+		// Success chance boost from investment (capped at 15%)
+		const successBoost = Math.min(
+			15,
+			amount * INVESTMENT_SUCCESS_MULTIPLIER * 100,
+		);
+
+		// Additional recruitment attempts from investment
+		const additionalAttempts = Math.floor(
+			amount * INVESTMENT_ATTEMPTS_MULTIPLIER,
+		);
+
+		return { successBoost, additionalAttempts };
+	};
+
+	// Handle network marketing
+	const handleNetworkMarketing = (
+		intensity: "light" | "medium" | "aggressive",
+	) => {
+		dispatch({
+			type: "NETWORK_MARKETING",
+			intensity,
+			purpose: activeTab,
+			investmentAmount: activeTab === "recruitment" ? investmentAmount : 0,
+		});
+		setShowEventDialog(false); // Close dialog after action
+		// Reset investment amount to minimum after sending
+		setInvestmentAmount(MIN_INVESTMENT);
+	};
+
+	// Determine if player is low on money and products - to adjust messaging
+	const isLowOnResources = () => {
+		const lowMoney = playerStats.money < 100;
+		const totalInventory = Object.values(playerStats.inventory).reduce(
+			(sum, qty) => sum + qty,
+			0,
+		);
+		const lowInventory = totalInventory < 5;
+
+		return lowMoney || lowInventory;
+	};
+
+	// Check if a marketing event is already running
+	const isMarketingEventRunning = () => {
+		return marketingEvents.length > 0;
+	};
+
+	// Get the duration text for an event type
+	const getEventDurationText = (
+		intensity: "light" | "medium" | "aggressive",
+	) => {
+		switch (intensity) {
+			case "light":
+				return `${SOCIAL_MEDIA_DURATION} hours (1 day)`;
+			case "medium":
+				return `${HOME_PARTY_DURATION} hours (2 days)`;
+			case "aggressive":
+				return `${PUBLIC_WORKSHOP_DURATION} hours (7 days)`;
+			default:
+				return "";
+		}
+	};
+
+	// Get event title based on purpose
+	const getEventTitle = (purpose: "cash" | "recruitment") => {
+		return purpose === "cash"
+			? "Host a Cash Marketing Event"
+			: "Host a Recruitment Event";
+	};
+
+	// Get event description based on purpose
+	const getEventDescription = (purpose: "cash" | "recruitment") => {
+		return purpose === "cash"
+			? "Marketing events require energy and run for a period of time. When completed, they'll generate cash based on your success rate."
+			: "Recruitment events run over time and help you find potential recruits for your network. Investing more money improves your chances and the number of potential recruits.";
 	};
 
 	return (
 		<PanelContainer>
-			<Title>Game Actions</Title>
-			<TimeDisplay>
-				Day {gameDay} - {formatTime(gameHour)}
-				{playerStats.isResting && " (Resting)"}
-			</TimeDisplay>
+			<PanelTitle>
+				<PanelTitleIcon>📊</PanelTitleIcon> Inventory & Products
+			</PanelTitle>
+
+			{/* Money Display */}
+			<MoneyDisplay className={flashMoney ? "flash" : ""}>
+				<MoneyIcon>💰</MoneyIcon> Your Money: ${playerStats.money}
+			</MoneyDisplay>
 
 			{playerStats.isResting && (
 				<RestingMessage>
-					You are currently resting. Your actions are limited until you finish
-					resting.
+					<span>😴</span> You are currently resting and cannot perform actions.
 				</RestingMessage>
 			)}
 
-			<Section>
-				<GameActionCard onClick={handleCollectMoney}>
-					<GameActionTitle>
-						<ActionIcon>💰</ActionIcon> Network Activation
-					</GameActionTitle>
-					<GameActionDescription>
-						Activate your network to generate money from your downline.
-					</GameActionDescription>
-					<GameActionCost>
-						<span>Cost: 1 Energy</span>
-						{playerStats.energy < 1 && (
-							<StatusTag isAffordable={false}>No Energy</StatusTag>
+			{/* Active Marketing Event Banner */}
+			{marketingEvents.length > 0 &&
+				marketingEvents.map((event) => (
+					<ActiveEventBanner key={event.id}>
+						<EventTitle>
+							<div>
+								<EventIcon>{getEventIcon(event.type)}</EventIcon>
+								{event.name} In Progress
+							</div>
+							<span style={{ fontSize: "14px" }}>
+								{Math.round(event.successChance * 100)}% Success Rate
+							</span>
+						</EventTitle>
+						<EventTimeRemaining>
+							Time Remaining: {formatTimeRemaining(event.remainingHours)}
+						</EventTimeRemaining>
+						{event.purpose === "recruitment" && event.investmentAmount && (
+							<div
+								style={{
+									fontSize: "13px",
+									marginTop: "5px",
+									zIndex: 2,
+									position: "relative",
+								}}
+							>
+								Investment: ${event.investmentAmount}
+								<span style={{ marginLeft: "10px", color: "#FFD54F" }}>
+									+
+									{Math.round(
+										event.investmentAmount *
+											INVESTMENT_SUCCESS_MULTIPLIER *
+											100,
+									)}
+									% success
+								</span>
+							</div>
 						)}
-					</GameActionCost>
-				</GameActionCard>
+						<EventProgress>
+							<ProgressBar
+								progress={100 - (event.remainingHours / event.totalHours) * 100}
+							/>
+						</EventProgress>
+					</ActiveEventBanner>
+				))}
 
-				<GameActionCard onClick={handleShortRest}>
-					<GameActionTitle>
-						<ActionIcon>🛌</ActionIcon> Power Nap
-					</GameActionTitle>
-					<GameActionDescription>
-						Take a short rest to recover some energy. Time will advance by 8
-						hours.
-					</GameActionDescription>
-					<GameActionCost>
-						<span>Gain: ~5-8 Energy</span>
-					</GameActionCost>
-				</GameActionCard>
+			{/* Host an Event Button */}
+			<EventButton
+				onClick={() => setShowEventDialog(true)}
+				isEmergency={isLowOnResources()}
+				disabled={playerStats.isResting || isMarketingEventRunning()}
+			>
+				<EventIcon>📣</EventIcon>
+				{isLowOnResources()
+					? "Host a Marketing Event"
+					: "Host a Marketing Event"}
+				{isMarketingEventRunning() && (
+					<StatusTag isPositive={false}>Event in Progress</StatusTag>
+				)}
+			</EventButton>
 
-				<GameActionCard onClick={handleLongRest}>
-					<GameActionTitle>
-						<ActionIcon>😴</ActionIcon> Deep Rest
-					</GameActionTitle>
-					<GameActionDescription>
-						Take a longer rest to recover more energy. Time will advance by 16
-						hours.
-					</GameActionDescription>
-					<GameActionCost>
-						<span>Gain: ~12-16 Energy</span>
-					</GameActionCost>
-				</GameActionCard>
-			</Section>
+			{/* Event Dialog Modal */}
+			{showEventDialog && (
+				<EventDialogOverlay onClick={() => setShowEventDialog(false)}>
+					<EventDialog onClick={(e) => e.stopPropagation()}>
+						<DialogTitle>{getEventTitle(activeTab)}</DialogTitle>
+
+						{/* Tab Selector */}
+						<TabContainer>
+							<Tab
+								active={activeTab === "cash"}
+								onClick={() => setActiveTab("cash")}
+							>
+								Cash Generation
+							</Tab>
+							<Tab
+								active={activeTab === "recruitment"}
+								onClick={() => setActiveTab("recruitment")}
+							>
+								Recruitment
+							</Tab>
+						</TabContainer>
+
+						<DialogDescription>
+							{getEventDescription(activeTab)}
+						</DialogDescription>
+
+						{/* Investment slider for recruitment events */}
+						{activeTab === "recruitment" && (
+							<InvestmentContainer>
+								<InvestmentLabel>
+									Investment Amount
+									<InvestmentAmount>${investmentAmount}</InvestmentAmount>
+								</InvestmentLabel>
+								<InvestmentSlider
+									type="range"
+									min={MIN_INVESTMENT}
+									max={Math.min(MAX_INVESTMENT, playerStats.money)}
+									value={investmentAmount}
+									onChange={(e) =>
+										setInvestmentAmount(parseInt(e.target.value))
+									}
+								/>
+								<InvestmentBenefits>
+									{calculateInvestmentBenefits(investmentAmount).successBoost >
+										0 && (
+										<Benefit>
+											<BenefitIcon>✅</BenefitIcon>+
+											{calculateInvestmentBenefits(
+												investmentAmount,
+											).successBoost.toFixed(1)}
+											% recruitment success chance
+										</Benefit>
+									)}
+									{calculateInvestmentBenefits(investmentAmount)
+										.additionalAttempts > 0 && (
+										<Benefit>
+											<BenefitIcon>✅</BenefitIcon>
+											{
+												calculateInvestmentBenefits(investmentAmount)
+													.additionalAttempts
+											}{" "}
+											additional recruitment attempts
+										</Benefit>
+									)}
+								</InvestmentBenefits>
+							</InvestmentContainer>
+						)}
+
+						<EventOption onClick={() => handleNetworkMarketing("light")}>
+							<EventOptionTitle>
+								<ActionIcon>📱</ActionIcon>
+								{activeTab === "cash"
+									? "Social Media Blitz"
+									: "Social Media Recruitment"}
+								{playerStats.energy < 2 && (
+									<StatusTag isPositive={false}>No Energy</StatusTag>
+								)}
+								{activeTab === "recruitment" &&
+									playerStats.money < investmentAmount && (
+										<StatusTag isPositive={false}>
+											Can't Afford Investment
+										</StatusTag>
+									)}
+							</EventOptionTitle>
+							<EventOptionDescription>
+								{activeTab === "cash"
+									? "Create targeted posts across all your social media platforms."
+									: "Find potential recruits through targeted social media posts."}
+								Runs for {getEventDurationText("light")}.
+							</EventOptionDescription>
+							<MarketingDetails>
+								<MarketingDetailItem>
+									<DetailLabel>Energy Cost:</DetailLabel> 2
+								</MarketingDetailItem>
+								{activeTab === "recruitment" && (
+									<MarketingDetailItem>
+										<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
+									</MarketingDetailItem>
+								)}
+								<MarketingDetailItem>
+									<DetailLabel>Duration:</DetailLabel>{" "}
+									{getEventDurationText("light")}
+								</MarketingDetailItem>
+								{activeTab === "cash" ? (
+									<MarketingDetailItem>
+										<DetailLabel>Reward Per Success:</DetailLabel> $24-36
+									</MarketingDetailItem>
+								) : (
+									<MarketingDetailItem>
+										<DetailLabel>Potential Recruits:</DetailLabel> 1-2
+									</MarketingDetailItem>
+								)}
+								<MarketingDetailItem>
+									<DetailLabel>Success Chance:</DetailLabel>{" "}
+									{Math.round(calculateMarketingChance("light") * 100)}%
+									{activeTab === "recruitment" && investmentAmount > 0 && (
+										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+											+
+											{calculateInvestmentBenefits(
+												investmentAmount,
+											).successBoost.toFixed(1)}
+											%
+										</span>
+									)}
+								</MarketingDetailItem>
+								<MarketingDetailItem>
+									<DetailLabel>Attempts:</DetailLabel>{" "}
+									{calculateMaxAttempts("light")}
+									{activeTab === "recruitment" &&
+										calculateInvestmentBenefits(investmentAmount)
+											.additionalAttempts > 0 && (
+											<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+												+
+												{
+													calculateInvestmentBenefits(investmentAmount)
+														.additionalAttempts
+												}
+											</span>
+										)}
+								</MarketingDetailItem>
+							</MarketingDetails>
+						</EventOption>
+
+						<EventOption onClick={() => handleNetworkMarketing("medium")}>
+							<EventOptionTitle>
+								<ActionIcon>🏠</ActionIcon>
+								{activeTab === "cash" ? "Home Party" : "Home Recruitment Party"}
+								{playerStats.energy < 5 && (
+									<StatusTag isPositive={false}>No Energy</StatusTag>
+								)}
+								{activeTab === "recruitment" &&
+									playerStats.money < investmentAmount && (
+										<StatusTag isPositive={false}>
+											Can't Afford Investment
+										</StatusTag>
+									)}
+							</EventOptionTitle>
+							<EventOptionDescription>
+								{activeTab === "cash"
+									? "Host a product demonstration for friends and family at your home."
+									: "Host a recruitment party at your home for potential business partners."}
+								Runs for {getEventDurationText("medium")}.
+							</EventOptionDescription>
+							<MarketingDetails>
+								<MarketingDetailItem>
+									<DetailLabel>Energy Cost:</DetailLabel> 5
+								</MarketingDetailItem>
+								{activeTab === "recruitment" && (
+									<MarketingDetailItem>
+										<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
+									</MarketingDetailItem>
+								)}
+								<MarketingDetailItem>
+									<DetailLabel>Duration:</DetailLabel>{" "}
+									{getEventDurationText("medium")}
+								</MarketingDetailItem>
+								{activeTab === "cash" ? (
+									<MarketingDetailItem>
+										<DetailLabel>Reward Per Success:</DetailLabel> $48-72
+									</MarketingDetailItem>
+								) : (
+									<MarketingDetailItem>
+										<DetailLabel>Potential Recruits:</DetailLabel> 1-3
+									</MarketingDetailItem>
+								)}
+								<MarketingDetailItem>
+									<DetailLabel>Success Chance:</DetailLabel>{" "}
+									{Math.round(calculateMarketingChance("medium") * 100)}%
+									{activeTab === "recruitment" && investmentAmount > 0 && (
+										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+											+
+											{calculateInvestmentBenefits(
+												investmentAmount,
+											).successBoost.toFixed(1)}
+											%
+										</span>
+									)}
+								</MarketingDetailItem>
+								<MarketingDetailItem>
+									<DetailLabel>Attempts:</DetailLabel>{" "}
+									{calculateMaxAttempts("medium")}
+									{activeTab === "recruitment" &&
+										calculateInvestmentBenefits(investmentAmount)
+											.additionalAttempts > 0 && (
+											<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+												+
+												{
+													calculateInvestmentBenefits(investmentAmount)
+														.additionalAttempts
+												}
+											</span>
+										)}
+								</MarketingDetailItem>
+							</MarketingDetails>
+						</EventOption>
+
+						<EventOption onClick={() => handleNetworkMarketing("aggressive")}>
+							<EventOptionTitle>
+								<ActionIcon>🎪</ActionIcon>
+								{activeTab === "cash"
+									? "Public Workshop"
+									: "Recruitment Seminar"}
+								{playerStats.energy < 8 && (
+									<StatusTag isPositive={false}>No Energy</StatusTag>
+								)}
+								{activeTab === "recruitment" &&
+									playerStats.money < investmentAmount && (
+										<StatusTag isPositive={false}>
+											Can't Afford Investment
+										</StatusTag>
+									)}
+							</EventOptionTitle>
+							<EventOptionDescription>
+								{activeTab === "cash"
+									? "Rent a space for a large promotional event with extensive preparation."
+									: "Host a professional seminar to attract serious business partners to your network."}
+								Runs for {getEventDurationText("aggressive")}.
+							</EventOptionDescription>
+							<MarketingDetails>
+								<MarketingDetailItem>
+									<DetailLabel>Energy Cost:</DetailLabel> 8
+								</MarketingDetailItem>
+								{activeTab === "recruitment" && (
+									<MarketingDetailItem>
+										<DetailLabel>Investment:</DetailLabel> ${investmentAmount}
+									</MarketingDetailItem>
+								)}
+								<MarketingDetailItem>
+									<DetailLabel>Duration:</DetailLabel>{" "}
+									{getEventDurationText("aggressive")}
+								</MarketingDetailItem>
+								{activeTab === "cash" ? (
+									<MarketingDetailItem>
+										<DetailLabel>Reward Per Success:</DetailLabel> $80-120
+									</MarketingDetailItem>
+								) : (
+									<MarketingDetailItem>
+										<DetailLabel>Potential Recruits:</DetailLabel> 2-4
+									</MarketingDetailItem>
+								)}
+								<MarketingDetailItem>
+									<DetailLabel>Success Chance:</DetailLabel>{" "}
+									{Math.round(calculateMarketingChance("aggressive") * 100)}%
+									{activeTab === "recruitment" && investmentAmount > 0 && (
+										<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+											+
+											{calculateInvestmentBenefits(
+												investmentAmount,
+											).successBoost.toFixed(1)}
+											%
+										</span>
+									)}
+								</MarketingDetailItem>
+								<MarketingDetailItem>
+									<DetailLabel>Attempts:</DetailLabel>{" "}
+									{calculateMaxAttempts("aggressive")}
+									{activeTab === "recruitment" &&
+										calculateInvestmentBenefits(investmentAmount)
+											.additionalAttempts > 0 && (
+											<span style={{ color: "#4CAF50", marginLeft: "5px" }}>
+												+
+												{
+													calculateInvestmentBenefits(investmentAmount)
+														.additionalAttempts
+												}
+											</span>
+										)}
+								</MarketingDetailItem>
+							</MarketingDetails>
+						</EventOption>
+
+						<CloseButton onClick={() => setShowEventDialog(false)}>
+							Cancel
+						</CloseButton>
+					</EventDialog>
+				</EventDialogOverlay>
+			)}
+
+			<InventorySection>
+				<SectionTitle>
+					<SectionTitleIcon>🛒</SectionTitleIcon> Product Inventory
+				</SectionTitle>
+
+				{products.map((product) => {
+					const quantity = playerStats.inventory[product.id] || 0;
+					const isSelected = selectedProduct === product.id;
+
+					return (
+						<ProductCard
+							key={product.id}
+							onClick={() => setSelectedProduct(product.id)}
+						>
+							<ProductHeader>
+								<ProductName>{product.name}</ProductName>
+								<ProductQuantity>{quantity} in stock</ProductQuantity>
+							</ProductHeader>
+
+							<ProductDetails>
+								Cost: ${product.baseCost} | Retail: ${product.basePrice} |
+								Downstream: ${product.downsellPrice}
+							</ProductDetails>
+
+							{isSelected && (
+								<>
+									<QuantityControls>
+										<QuantityButton
+											onClick={(e) => {
+												e.stopPropagation();
+												setProductQuantity(Math.max(5, productQuantity - 5));
+											}}
+											disabled={productQuantity <= 5}
+										>
+											-
+										</QuantityButton>
+										<QuantityInput
+											type="number"
+											min="5"
+											step="5"
+											value={productQuantity}
+											onChange={(e) =>
+												setProductQuantity(
+													Math.max(5, Number.parseInt(e.target.value) || 5),
+												)
+											}
+											onClick={(e) => e.stopPropagation()}
+										/>
+										<QuantityButton
+											onClick={(e) => {
+												e.stopPropagation();
+												setProductQuantity(productQuantity + 5);
+											}}
+										>
+											+
+										</QuantityButton>
+									</QuantityControls>
+
+									<ProductActions>
+										<ActionButton
+											onClick={(e) => {
+												e.stopPropagation();
+												handleBuyProduct(product.id);
+											}}
+											disabled={
+												playerStats.money <
+													product.baseCost * productQuantity ||
+												playerStats.energy < PRODUCT_BUY_ENERGY_COST
+											}
+										>
+											<ActionIcon>🛒</ActionIcon> Buy ({productQuantity})
+											{playerStats.energy < PRODUCT_BUY_ENERGY_COST && (
+												<StatusTag isPositive={false}>
+													Need {PRODUCT_BUY_ENERGY_COST} Energy
+												</StatusTag>
+											)}
+										</ActionButton>
+									</ProductActions>
+
+									<div
+										style={{
+											fontSize: "12px",
+											marginTop: "5px",
+											color: "#555",
+										}}
+									>
+										<div>
+											Daily auto-sell chance:{" "}
+											{Math.round(calculateSellChance(product.id) * 100)}%
+										</div>
+										<div style={{ marginTop: "2px" }}>
+											Cost: ${product.baseCost * productQuantity} +{" "}
+											{PRODUCT_BUY_ENERGY_COST} Energy
+										</div>
+									</div>
+								</>
+							)}
+						</ProductCard>
+					);
+				})}
+
+				<div style={{ fontSize: "13px", color: "#666", marginTop: "10px" }}>
+					<p>
+						<strong>Total Sales:</strong>
+						<br />
+						Random People: {playerStats.totalSalesRandom || 0} units
+						<br />
+						Downstream: {playerStats.totalSalesDownstream || 0} units
+					</p>
+					<p
+						style={{
+							backgroundColor: "#f5f5f5",
+							padding: "5px",
+							borderRadius: "3px",
+						}}
+					>
+						<strong>Note:</strong> Your inventory is automatically used to sell
+						to random people at the end of each day based on your charisma.
+					</p>
+				</div>
+			</InventorySection>
 
 			{pendingRecruits.length > 0 && (
 				<PendingRecruitsInfo>

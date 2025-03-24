@@ -8,6 +8,34 @@ import {
 	hasParent,
 } from "../utils/pyramidGenerator";
 
+// Constants for game mechanics
+const HOURS_PER_DAY = 3;
+const MAX_ENERGY = 20;
+const REST_ENERGY_PER_HOUR = 0.5; // Energy gained per hour of rest
+const ENERGY_COST = 800; // Cost to buy energy
+const PRODUCT_BUY_ENERGY_COST = 5; // Energy cost to buy products
+const NEW_RECRUIT_CHANCE = 0.08; // Chance for a successful recruit to generate new potential recruits (significantly reduced from 0.15)
+const MONEY_RECRUITMENT_FACTOR = 0.00005; // How much money affects recruitment (reduced from 0.00008)
+const BASE_RECRUITMENT_CHANCE = 0.12; // Base recruitment success chance (significantly reduced from 0.25)
+const AI_NODE_RECRUIT_CHANCE = 0.3; // Increased AI node recruitment chance to make competition harder
+const AI_NODE_EXPANSION_CHANCE = 0.4; // Increased AI expansion chance to make competition harder
+const DEFAULT_MAX_INVENTORY = 20; // Default maximum inventory capacity for nodes
+const NODE_RESTOCK_ENERGY_COST = 1; // Energy cost to restock a downstream node
+
+// Marketing event constants
+const SOCIAL_MEDIA_DURATION = 24; // 24 hours (1 day)
+const HOME_PARTY_DURATION = 48; // 48 hours (2 days)
+const PUBLIC_WORKSHOP_DURATION = 168; // 168 hours (7 days)
+const SOCIAL_MEDIA_ENERGY = 2;
+const HOME_PARTY_ENERGY = 5;
+const PUBLIC_WORKSHOP_ENERGY = 8;
+
+// Investment multipliers for recruitment events
+const MIN_INVESTMENT = 50;
+const MAX_INVESTMENT = 500;
+const INVESTMENT_SUCCESS_MULTIPLIER = 0.0005; // 0.05% per dollar invested
+const INVESTMENT_ATTEMPTS_MULTIPLIER = 0.002; // 0.2% per dollar invested
+
 // Initial player stats
 const initialPlayerStats: PlayerStats = {
 	money: 500,
@@ -20,20 +48,38 @@ const initialPlayerStats: PlayerStats = {
 	reputation: 1,
 	isResting: false,
 	restUntil: 0,
+	inventory: {},
+	totalSalesRandom: 0,
+	totalSalesDownstream: 0,
 };
 
-// Constants for game mechanics
-const HOURS_PER_DAY = 3; // Game day is 12 hours (9 AM to 9 PM)
-const MAX_ENERGY = 20;
-const REST_ENERGY_PER_HOUR = 1; // Energy gained per hour of rest
-const SHORT_REST_HOURS = 8; // Short rest period (8 hours)
-const LONG_REST_HOURS = 16; // Long rest period (16 hours)
-const ENERGY_COST = 800; // Cost to buy energy
-const NEW_RECRUIT_CHANCE = 0.1; // Chance for a successful recruit to generate new potential recruits (reduced from 0.3)
-const MONEY_RECRUITMENT_FACTOR = 0.00005; // How much money affects recruitment (reduced from 0.0001)
-const BASE_RECRUITMENT_CHANCE = 0.03; // Base recruitment success chance (reduced from 0.08)
-const AI_NODE_RECRUIT_CHANCE = 0.3; // Chance for AI nodes to recruit per day cycle (increased from 0.2)
-const AI_NODE_EXPANSION_CHANCE = 0.4; // Chance for AI nodes to expand and create new nodes (increased from 0.3)
+// Product definitions
+const productDefinitions = [
+	{
+		id: "essential-oils",
+		name: "Essential Oils",
+		baseCost: 10,
+		basePrice: 25,
+		downsellPrice: 15,
+		baseChance: 0.25, // 25% base chance to sell to a random person (increased from 0.2)
+	},
+	{
+		id: "wellness-supplements",
+		name: "Wellness Supplements",
+		baseCost: 20,
+		basePrice: 45,
+		downsellPrice: 30,
+		baseChance: 0.2, // 20% base chance to sell to a random person (increased from 0.15)
+	},
+	{
+		id: "lifestyle-kit",
+		name: "Lifestyle Enhancement Kit",
+		baseCost: 50,
+		basePrice: 120,
+		downsellPrice: 80,
+		baseChance: 0.15, // 15% base chance to sell to a random person (increased from 0.1)
+	},
+];
 
 // Create initial game state
 const createInitialGameState = (): GameState => {
@@ -46,6 +92,14 @@ const createInitialGameState = (): GameState => {
 		`Total nodes: ${pyramid.nodes.length}`,
 		`Player node: ${playerNode?.id} at level ${playerNode?.level}`,
 	);
+
+	// Initialize all nodes with inventory and max capacity
+	const initializedNodes = pyramid.nodes.map((node) => ({
+		...node,
+		inventory: {},
+		maxInventory: DEFAULT_MAX_INVENTORY,
+	}));
+	pyramid.nodes = initializedNodes;
 
 	// Make sure there are recruitable nodes below the player's position
 	// If player is not at the bottom level, check if there are nodes below
@@ -85,6 +139,8 @@ const createInitialGameState = (): GameState => {
 					pyramid.nodes[newNodeIndex] = {
 						...pyramid.nodes[newNodeIndex],
 						isPotentialRecruit: true,
+						inventory: {},
+						maxInventory: DEFAULT_MAX_INVENTORY,
 					};
 				}
 
@@ -98,11 +154,18 @@ const createInitialGameState = (): GameState => {
 	// Add version number to track changes
 	pyramid.version = 1;
 
+	// Initialize player inventory with some product
+	const playerInventory = {};
+	productDefinitions.forEach((product) => {
+		playerInventory[product.id] = 5; // Start with 5 of each product
+	});
+
 	return {
 		pyramid,
 		player: {
 			...initialPlayerStats,
 			currentNodeId: playerNode?.id || "",
+			inventory: playerInventory,
 		},
 		gameLevel: 1,
 		turns: 0,
@@ -112,6 +175,10 @@ const createInitialGameState = (): GameState => {
 		isWinner: false,
 		pendingRecruits: [],
 		lastDailyEnergyBonus: 0,
+		products: productDefinitions,
+		aiUpdateCounter: 0,
+		pyramidVersion: 0,
+		marketingEvents: [], // Initialize empty marketing events array
 	};
 };
 
@@ -211,7 +278,7 @@ const processDayCycle = (state: GameState): GameState => {
 
 	// 1. Generate potential recruits based on charisma
 	// Higher charisma = more potential recruits generated
-	const charismaGenerationChance = 0.15 + state.player.charisma * 0.03; // Reduced from 0.3 + charisma * 0.05
+	const charismaGenerationChance = 0.08 + state.player.charisma * 0.015; // Reduced from 0.12 + charisma * 0.025
 	const shouldGenerateNewRecruits = Math.random() < charismaGenerationChance;
 
 	console.log(
@@ -411,19 +478,19 @@ const processDayCycle = (state: GameState): GameState => {
 			// If there are unowned nodes, add some of them to pending recruits
 			if (unownedNodesBelow.length > 0) {
 				// Recruiting chance influenced by charisma for GENERATION only
-				const naturalRecruitChance = 0.2 + state.player.charisma * 0.03; // Reduced from 0.35 + charisma * 0.05
+				const naturalRecruitChance = 0.12 + state.player.charisma * 0.02; // Reduced from 0.2 + charisma * 0.03
 				const shouldAddNaturalRecruits = Math.random() < naturalRecruitChance;
 
 				if (shouldAddNaturalRecruits) {
 					// Calculate recruitment chance based on player stats
 					// Recruiting power is the main factor for success chance
 					let baseChance =
-						BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.04; // Reduced from 0.06
+						BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.06; // Changed from 0.04
 					// Charisma no longer affects recruitment success chance
 					// Money provides a small boost
 					baseChance += state.player.money * MONEY_RECRUITMENT_FACTOR;
-					baseChance += 0.02; // Reduced from 0.05
-					const recruitmentChance = Math.min(baseChance, 0.75); // Reduced from 0.9
+					baseChance += 0.01; // Reduced from 0.02
+					const recruitmentChance = Math.min(baseChance, 0.65); // Reduced from 0.75
 
 					// Take up to 2 random unowned nodes and add them to pending recruits
 					const numToAdd = Math.min(2, unownedNodesBelow.length);
@@ -567,25 +634,25 @@ const processDayCycle = (state: GameState): GameState => {
 	// Calculate base formula for recruitment chance
 	// Recruiting power has the strongest effect on recruitment success
 	let baseFormula =
-		BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.04; // Reduced from 0.06
+		BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.06; // Changed from 0.04
 	// Charisma no longer affects recruitment success
-	// Money provides a small boost to recruitment success
+	// Money provides a smaller boost
 	baseFormula += state.player.money * MONEY_RECRUITMENT_FACTOR;
-	// Add smaller base bonus
-	baseFormula += 0.02; // Reduced from 0.05
-	// Cap at 75%
-	const cappedFormula = Math.min(0.75, baseFormula); // Reduced from 0.9
+	// Smaller base bonus
+	baseFormula += 0.01; // Reduced from 0.02
+	// Cap at 65%
+	const cappedFormula = Math.min(0.65, baseFormula); // Reduced from 0.75
 
 	console.log(
-		`%c[RECRUIT CHANCE] Base formula: ${BASE_RECRUITMENT_CHANCE} + (${state.player.recruitingPower} × 0.04) + ($${state.player.money} × ${MONEY_RECRUITMENT_FACTOR}) + 0.02 bonus = ${baseFormula.toFixed(2)} → capped at ${cappedFormula.toFixed(2)} (${Math.round(cappedFormula * 100)}%)`,
+		`%c[RECRUIT CHANCE] Base formula: ${BASE_RECRUITMENT_CHANCE} + (${state.player.recruitingPower} × 0.06) + ($${state.player.money} × ${MONEY_RECRUITMENT_FACTOR}) + 0.01 bonus = ${baseFormula.toFixed(2)} → capped at ${cappedFormula.toFixed(2)} (${Math.round(cappedFormula * 100)}%)`,
 		"background: #ff9800; color: white; padding: 2px 5px; border-radius: 3px;",
 	);
 
 	for (const pendingRecruit of state.pendingRecruits) {
 		// Apply the formula for this specific recruitment
 		const recruitChance = Math.min(
-			0.75, // Cap at 75% max (reduced from 90%)
-			pendingRecruit.chance + 0.05, // Add 5% bonus to stored chance (reduced from 10%)
+			0.65, // Cap at 65% max (reduced from 70%)
+			pendingRecruit.chance + 0.03, // Add 3% bonus to stored chance (reduced from 5%)
 		);
 
 		const roll = Math.random();
@@ -731,6 +798,388 @@ const processDayCycle = (state: GameState): GameState => {
 		`[PYRAMID STATUS] Owned nodes: ${ownedNodes} (${playerPercentage}%), AI nodes: ${aiNodeCount} (${aiPercentage}%), Total: ${totalNodes} nodes`,
 	);
 
+	// Process automatic sales from downstream nodes
+	// This simulates your recruits selling products to random people
+	const playerOwnedNodes = updatedNodes.filter(
+		(node) => node.ownedByPlayer && !node.isPlayerPosition,
+	);
+
+	if (playerOwnedNodes.length > 0) {
+		console.log(
+			`[DOWNSTREAM SALES] Processing sales from ${playerOwnedNodes.length} owned nodes`,
+		);
+
+		// Keep track of total profit from downstream sales
+		let totalDownstreamProfit = 0;
+		let totalDownstreamSales = 0;
+
+		// Calculate commission percentage based on player's charisma and reputation
+		// Higher charisma and reputation means higher percentage of downstream sales
+		const baseCommissionPercentage = 0.3; // 30% base
+		const charismaBonus = state.player.charisma * 0.03; // 3% per charisma point
+		const reputationBonus = state.player.reputation * 0.05; // 5% per reputation point
+		const commissionPercentage = Math.min(
+			0.8,
+			baseCommissionPercentage + charismaBonus + reputationBonus,
+		);
+
+		console.log(
+			`[DOWNSTREAM COMMISSION] Your commission rate is ${(commissionPercentage * 100).toFixed(1)}% (Base: 30%, Charisma: +${(charismaBonus * 100).toFixed(1)}%, Reputation: +${(reputationBonus * 100).toFixed(1)}%)`,
+		);
+
+		// First, automatically restock nodes with low inventory
+		const updatedPlayerInventory = { ...state.player.inventory };
+		let restockCost = 0;
+
+		console.log(
+			`[DOWNSTREAM RESTOCK] Automatically checking nodes that need restocking`,
+		);
+
+		// For each owned node, process sales based on their inventory
+		const nodesWithSales = playerOwnedNodes.map((node) => {
+			// Check if node needs restocking (less than 25% capacity)
+			const totalInventory = Object.values(node.inventory || {}).reduce(
+				(sum, qty) => sum + qty,
+				0,
+			);
+			const needsRestock = totalInventory < node.maxInventory * 0.25;
+
+			// Automatically restock if inventory is low
+			let updatedNodeInventory = { ...node.inventory };
+
+			if (needsRestock) {
+				console.log(
+					`[DOWNSTREAM RESTOCK] Node ${node.id.substring(0, 6)}... is low on inventory (${totalInventory}/${node.maxInventory})`,
+				);
+
+				// Look through player's inventory and restock one product at a time
+				// Prioritize products that the node already sells
+				let availableSpace = node.maxInventory - totalInventory;
+
+				// First try to restock products the node already has
+				for (const [productId, quantity] of Object.entries(
+					updatedNodeInventory,
+				)) {
+					if (quantity <= 2 && availableSpace > 0) {
+						// Only restock if less than 2 items left
+						const product = state.products.find((p) => p.id === productId);
+						if (!product) continue;
+
+						// Check if player has this product
+						const playerQuantity = updatedPlayerInventory[productId] || 0;
+						if (playerQuantity > 0) {
+							// Calculate how much to restock
+							const restockQuantity = Math.min(
+								Math.floor(node.maxInventory * 0.5) - quantity, // Restock to 50% capacity
+								playerQuantity, // Limited by player inventory
+								availableSpace, // Limited by available space
+							);
+
+							if (restockQuantity > 0) {
+								// Update node and player inventory
+								updatedNodeInventory[productId] =
+									(updatedNodeInventory[productId] || 0) + restockQuantity;
+								updatedPlayerInventory[productId] =
+									playerQuantity - restockQuantity;
+								availableSpace -= restockQuantity;
+
+								// Add to restock cost (player gets wholesale price)
+								restockCost += product.downsellPrice * restockQuantity;
+
+								console.log(
+									`[DOWNSTREAM RESTOCK] Restocked ${restockQuantity} ${product.name} to node ${node.id.substring(0, 6)}... for $${product.downsellPrice * restockQuantity}`,
+								);
+							}
+						}
+					}
+				}
+
+				// If the node still has space and few or no products, add some new products
+				if (
+					availableSpace > 0 &&
+					(Object.keys(updatedNodeInventory).length === 0 ||
+						totalInventory < node.maxInventory * 0.1)
+				) {
+					// Try to add new products the player has
+					for (const product of state.products) {
+						// Skip if node already has this product
+						if (
+							updatedNodeInventory[product.id] &&
+							updatedNodeInventory[product.id] > 0
+						) {
+							continue;
+						}
+
+						// Check if player has this product
+						const playerQuantity = updatedPlayerInventory[product.id] || 0;
+						if (playerQuantity > 0) {
+							// Calculate how much to stock
+							const stockQuantity = Math.min(
+								Math.floor(node.maxInventory * 0.3), // Stock to 30% capacity
+								playerQuantity, // Limited by player inventory
+								availableSpace, // Limited by available space
+							);
+
+							if (stockQuantity > 0) {
+								// Update node and player inventory
+								updatedNodeInventory[product.id] = stockQuantity;
+								updatedPlayerInventory[product.id] =
+									playerQuantity - stockQuantity;
+								availableSpace -= stockQuantity;
+
+								// Add to restock cost (player gets wholesale price)
+								restockCost += product.downsellPrice * stockQuantity;
+
+								console.log(
+									`[DOWNSTREAM RESTOCK] Added new product: ${stockQuantity} ${product.name} to node ${node.id.substring(0, 6)}... for $${product.downsellPrice * stockQuantity}`,
+								);
+							}
+						}
+					}
+				}
+			}
+
+			// Process sales for this node
+			let nodeProfit = 0;
+			let nodeSalesCount = 0;
+
+			// Skip if node has no inventory after restocking
+			if (
+				!updatedNodeInventory ||
+				Object.values(updatedNodeInventory).reduce(
+					(sum, qty) => sum + qty,
+					0,
+				) === 0
+			) {
+				return {
+					...node,
+					inventory: updatedNodeInventory,
+				};
+			}
+
+			// Calculate node-specific selling factors
+			// Nodes higher in the pyramid (lower level numbers) are better at selling
+			const levelFactor = Math.max(0, (7 - node.level) * 0.03); // 0% to 18% bonus based on level
+
+			// Nodes that have been owned longer have better reputation
+			const ageBonus = node.lastUpdated
+				? Math.min(
+						0.1,
+						((Date.now() - node.lastUpdated) / (1000 * 60 * 60 * 24)) * 0.01,
+					) // Up to 10% bonus for 10+ days owned
+				: 0;
+
+			// For each product in inventory, attempt to sell some
+			for (const [productId, quantity] of Object.entries(
+				updatedNodeInventory,
+			)) {
+				if (quantity <= 0) continue;
+
+				// Find product details
+				const product = state.products.find((p) => p.id === productId);
+				if (!product) continue;
+
+				// Calculate max items they can sell per day based on level
+				// Higher levels (lower numbers) can sell more items
+				const maxSellAttempts = Math.min(
+					quantity,
+					Math.floor(1 + (7 - node.level) * 0.7), // Increased from 0.5 to make higher levels more effective
+				);
+
+				if (maxSellAttempts <= 0) continue;
+
+				// Calculate chance of successful sale for this specific node and product
+				// Base chance from product
+				const nodeBaseSaleChance = Math.min(0.8, product.baseChance + 0.08);
+
+				// Apply node-specific factors
+				const nodeSaleChance = Math.min(
+					0.9,
+					nodeBaseSaleChance + levelFactor + ageBonus,
+				);
+
+				console.log(
+					`[DOWNSTREAM SALES] Node ${node.id.substring(0, 6)}... selling ${product.name}: Base chance ${(nodeBaseSaleChance * 100).toFixed(1)}% + Level bonus ${(levelFactor * 100).toFixed(1)}% + Age bonus ${(ageBonus * 100).toFixed(1)}% = Final chance ${(nodeSaleChance * 100).toFixed(1)}%`,
+				);
+
+				// Attempt to sell items
+				let soldItems = 0;
+				for (let i = 0; i < maxSellAttempts; i++) {
+					if (Math.random() < nodeSaleChance) {
+						soldItems++;
+					}
+				}
+
+				if (soldItems > 0) {
+					// Calculate profit
+					const salesRevenue = soldItems * product.basePrice;
+					nodeProfit += salesRevenue;
+					nodeSalesCount += soldItems;
+
+					// Update inventory
+					updatedNodeInventory[productId] = quantity - soldItems;
+
+					console.log(
+						`[DOWNSTREAM SALES] Node ${node.id.substring(0, 6)}... sold ${soldItems}/${maxSellAttempts} ${product.name} for $${salesRevenue}`,
+					);
+				}
+			}
+
+			// Split profits - node keeps (1-commission)%, player gets commission%
+			const playerCommission = Math.floor(nodeProfit * commissionPercentage);
+			const nodeKeeps = nodeProfit - playerCommission;
+
+			// Update totals
+			totalDownstreamProfit += playerCommission;
+			totalDownstreamSales += nodeSalesCount;
+
+			// Update node with new inventory and add profit
+			return {
+				...node,
+				inventory: updatedNodeInventory,
+				money: node.money + nodeKeeps, // Node keeps its portion of sales
+				lastRestocked: needsRestock ? Date.now() : node.lastRestocked,
+			};
+		});
+
+		// Update nodes in the pyramid
+		updatedNodes = updatedNodes.map((node) => {
+			const updatedNode = nodesWithSales.find((n) => n.id === node.id);
+			if (updatedNode) {
+				return updatedNode;
+			}
+			return node;
+		});
+
+		updatedPyramid = {
+			...updatedPyramid,
+			nodes: updatedNodes,
+		};
+
+		// Update player with new inventory, money (adding commission), and sales count
+		let updatedPlayer = { ...state.player };
+
+		// Apply restocking cost to player's money
+		updatedPlayer.money = Math.max(0, updatedPlayer.money - restockCost);
+
+		// Add commission from sales to player's money
+		updatedPlayer.money += totalDownstreamProfit;
+
+		// Update player inventory after restocking
+		updatedPlayer.inventory = updatedPlayerInventory;
+
+		// Update total sales to downstream count
+		updatedPlayer.totalSalesDownstream =
+			(updatedPlayer.totalSalesDownstream || 0) + totalDownstreamSales;
+
+		if (restockCost > 0) {
+			console.log(`[DOWNSTREAM RESTOCK] Total restock cost: $${restockCost}`);
+			pyramidChanged = true;
+		}
+
+		// If downstream nodes made sales, indicate pyramid changed
+		if (totalDownstreamProfit > 0) {
+			pyramidChanged = true;
+			console.log(
+				`[DOWNSTREAM SALES] Your commission from downstream sales: $${totalDownstreamProfit} (${totalDownstreamSales} units sold)`,
+			);
+		} else {
+			console.log(
+				`[DOWNSTREAM SALES] No sales made by your downstreams today.`,
+			);
+		}
+	}
+
+	// Process automatic sales from player's inventory to random people
+	// This happens at the end of each day and doesn't cost energy
+	let updatedPlayer = { ...state.player };
+	const processPlayerRandomSales = () => {
+		console.log(
+			`[PLAYER RANDOM SALES] Processing automatic sales from player's inventory`,
+		);
+
+		// Skip if player has no inventory
+		if (
+			!updatedPlayer.inventory ||
+			Object.values(updatedPlayer.inventory).reduce(
+				(sum, qty) => sum + qty,
+				0,
+			) === 0
+		) {
+			console.log(`[PLAYER RANDOM SALES] No inventory to sell`);
+			return;
+		}
+
+		let totalSales = 0;
+		let totalRevenue = 0;
+		const updatedInventory = { ...updatedPlayer.inventory };
+
+		// For each product in player's inventory, attempt to sell some
+		for (const [productId, quantity] of Object.entries(updatedInventory)) {
+			if (quantity <= 0) continue;
+
+			// Find product details
+			const product = state.products.find((p) => p.id === productId);
+			if (!product) continue;
+
+			// Calculate max items player can sell per day
+			// This depends on charisma - higher charisma means more sales attempts
+			const maxSellAttempts = Math.min(
+				quantity,
+				Math.floor(3 + updatedPlayer.charisma),
+			);
+
+			if (maxSellAttempts <= 0) continue;
+
+			// Calculate sale chance based on charisma and product base chance
+			const saleChance = Math.min(
+				0.98, // Increased max cap from 0.95
+				product.baseChance + updatedPlayer.charisma * 0.06, // Increased charisma impact from 0.05
+			);
+
+			// Attempt to sell items
+			let soldItems = 0;
+			for (let i = 0; i < maxSellAttempts; i++) {
+				if (Math.random() < saleChance) {
+					soldItems++;
+				}
+			}
+
+			if (soldItems > 0) {
+				// Calculate revenue
+				const salesRevenue = soldItems * product.basePrice;
+				totalRevenue += salesRevenue;
+				totalSales += soldItems;
+
+				// Update inventory
+				updatedInventory[productId] = quantity - soldItems;
+
+				console.log(
+					`[PLAYER RANDOM SALES] Sold ${soldItems}/${maxSellAttempts} ${product.name} for $${salesRevenue}`,
+				);
+			}
+		}
+
+		// Update player with new inventory and money
+		if (totalSales > 0) {
+			updatedPlayer = {
+				...updatedPlayer,
+				inventory: updatedInventory,
+				money: updatedPlayer.money + totalRevenue,
+				totalSalesRandom: (updatedPlayer.totalSalesRandom || 0) + totalSales,
+			};
+
+			console.log(
+				`[PLAYER RANDOM SALES] Total sales: ${totalSales} items for $${totalRevenue}`,
+			);
+		} else {
+			console.log(`[PLAYER RANDOM SALES] No successful sales today`);
+		}
+	};
+
+	// Process player random sales
+	processPlayerRandomSales();
+
 	// Only increment version if the pyramid structure changed
 	if (pyramidChanged) {
 		updatedPyramid = incrementPyramidVersion(updatedPyramid);
@@ -743,7 +1192,7 @@ const processDayCycle = (state: GameState): GameState => {
 		...state,
 		pyramid: updatedPyramid,
 		player: {
-			...state.player,
+			...updatedPlayer,
 			recruits: newRecruits,
 		},
 		pendingRecruits: [], // Clear pending recruits after processing
@@ -787,28 +1236,152 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 		updatedState = processDayCycle(updatedState);
 	}
 
-	// Update energy if resting
-	const player = { ...updatedState.player };
-	if (player.isResting) {
-		// Accumulate rest energy
-		const energyGained = Math.min(
-			MAX_ENERGY - player.energy,
-			hours * REST_ENERGY_PER_HOUR,
-		);
-		player.energy += energyGained;
+	// Process active marketing events
+	const updatedMarketingEvents = state.marketingEvents.map((event) => {
+		// Reduce remaining hours
+		const remainingHours = Math.max(0, event.remainingHours - hours);
 
-		// Check if rest period is over
-		if (newDay * HOURS_PER_DAY + newHour >= player.restUntil) {
-			player.isResting = false;
+		// If event just completed, process results
+		if (event.remainingHours > 0 && remainingHours === 0) {
+			if (event.purpose === "cash") {
+				// Generate results for completed cash marketing event
+				const successAttempts = generateMarketingResults(event);
+
+				// Calculate total reward
+				let totalReward = 0;
+				for (let i = 0; i < successAttempts; i++) {
+					const rewardAmount = Math.floor(
+						event.baseReward.min +
+							Math.random() * (event.baseReward.max - event.baseReward.min),
+					);
+					totalReward += rewardAmount;
+				}
+
+				// Apply reward to player
+				updatedState.player.money += totalReward;
+
+				console.log(
+					`Marketing event "${event.name}" completed with ${successAttempts} successful attempts, earning $${totalReward}`,
+				);
+			} else if (event.purpose === "recruitment") {
+				// Process recruitment marketing event
+				processRecruitmentEvent(updatedState, event);
+			}
 		}
-	}
 
+		return {
+			...event,
+			remainingHours,
+		};
+	});
+
+	// Filter out completed events
+	updatedState.marketingEvents = updatedMarketingEvents.filter(
+		(event) => event.remainingHours > 0,
+	);
+
+	// Return updated state with new time
 	return {
 		...updatedState,
 		gameHour: newHour,
 		gameDay: newDay,
-		player,
 	};
+};
+
+// Helper function to process recruitment marketing events
+const processRecruitmentEvent = (
+	state: GameState,
+	event: MarketingEvent,
+): GameState => {
+	// Generate results for completed recruitment marketing event
+	const successAttempts = generateMarketingResults(event);
+
+	console.log(
+		`Recruitment event "${event.name}" completed with ${successAttempts} successful recruits found`,
+	);
+
+	// If no recruits, return unchanged state
+	if (successAttempts === 0) {
+		console.log(`No potential recruits generated from ${event.name}`);
+		return state;
+	}
+
+	// Generate potential recruits
+	const newRecruits: { nodeId: string; chance: number }[] = [];
+
+	for (let i = 0; i < successAttempts; i++) {
+		// Calculate recruitment chance based on player stats and event
+		const baseChance = 0.12 + state.player.charisma * 0.02;
+		const recruitingBonus = state.player.recruitingPower * 0.06;
+		const reputationBonus = state.player.reputation * 0.04;
+
+		// Investment provides additional bonus
+		const investmentBonus = event.investmentAmount
+			? Math.min(0.2, event.investmentAmount * INVESTMENT_SUCCESS_MULTIPLIER)
+			: 0;
+
+		// Calculate final chance, capped at 65%
+		let recruitChance = Math.min(
+			0.65,
+			baseChance + recruitingBonus + reputationBonus + investmentBonus,
+		);
+
+		// Generate a unique node ID for the potential recruit
+		const potentialNodeId = `potential-${Date.now()}-${i}`;
+
+		newRecruits.push({
+			nodeId: potentialNodeId,
+			chance: recruitChance,
+		});
+
+		console.log(
+			`Generated potential recruit with ${Math.round(recruitChance * 100)}% chance of success`,
+		);
+	}
+
+	// Add new potential recruits to the state
+	return {
+		...state,
+		pendingRecruits: [...state.pendingRecruits, ...newRecruits],
+	};
+};
+
+// Helper function to generate marketing results
+const generateMarketingResults = (event: MarketingEvent): number => {
+	let successfulAttempts = 0;
+
+	// Calculate additional attempts from investment
+	let attemptBonus = 0;
+	if (event.investmentAmount && event.purpose === "recruitment") {
+		attemptBonus = Math.floor(
+			event.investmentAmount * INVESTMENT_ATTEMPTS_MULTIPLIER,
+		);
+	}
+
+	const totalAttempts = event.maxAttempts + attemptBonus;
+
+	// Calculate investment-boosted success chance
+	let adjustedChance = event.successChance;
+	if (event.investmentAmount) {
+		const investmentBonus = Math.min(
+			0.15,
+			event.investmentAmount * INVESTMENT_SUCCESS_MULTIPLIER,
+		);
+		adjustedChance = Math.min(0.95, adjustedChance + investmentBonus);
+	}
+
+	// Try the maximum number of attempts
+	for (let i = 0; i < totalAttempts; i++) {
+		if (Math.random() < adjustedChance) {
+			successfulAttempts++;
+		}
+	}
+
+	console.log(
+		`Marketing event results: ${successfulAttempts} successes from ${totalAttempts} attempts (${Math.round(adjustedChance * 100)}% chance)`,
+	);
+
+	return successfulAttempts;
 };
 
 // Game state reducer
@@ -823,6 +1396,127 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 	}
 
 	switch (action.type) {
+		case "NETWORK_MARKETING": {
+			const {
+				intensity,
+				purpose = "cash",
+				eventName,
+				investmentAmount = 0,
+			} = action;
+			const { player } = state;
+
+			let duration = 0;
+			let energyCost = 0;
+			let eventType: "social-media" | "home-party" | "workshop";
+			let baseReward = { min: 0, max: 0 };
+			let displayName = "";
+
+			// Set parameters based on intensity
+			switch (intensity) {
+				case "light":
+					duration = SOCIAL_MEDIA_DURATION;
+					energyCost = SOCIAL_MEDIA_ENERGY;
+					eventType = "social-media";
+					baseReward =
+						purpose === "cash" ? { min: 24, max: 36 } : { min: 1, max: 1 };
+					displayName =
+						eventName ||
+						(purpose === "cash"
+							? "Social Media Blitz"
+							: "Social Media Recruitment");
+					break;
+				case "medium":
+					duration = HOME_PARTY_DURATION;
+					energyCost = HOME_PARTY_ENERGY;
+					eventType = "home-party";
+					baseReward =
+						purpose === "cash" ? { min: 48, max: 72 } : { min: 1, max: 2 };
+					displayName =
+						eventName ||
+						(purpose === "cash" ? "Home Party" : "Home Recruitment Party");
+					break;
+				case "aggressive":
+					duration = PUBLIC_WORKSHOP_DURATION;
+					eventType = "workshop";
+					energyCost = PUBLIC_WORKSHOP_ENERGY;
+					baseReward =
+						purpose === "cash" ? { min: 80, max: 120 } : { min: 2, max: 4 };
+					displayName =
+						eventName ||
+						(purpose === "cash" ? "Public Workshop" : "Recruitment Seminar");
+					break;
+				default:
+					return state; // Invalid intensity
+			}
+
+			// Check if player has enough energy
+			if (player.energy < energyCost) {
+				console.log(`Not enough energy to start ${displayName}`);
+				return state;
+			}
+
+			// Check if player has enough money for the investment (if applicable)
+			if (investmentAmount > 0 && player.money < investmentAmount) {
+				console.log(
+					`Not enough money for the investment amount of $${investmentAmount}`,
+				);
+				return state;
+			}
+
+			// Calculate success chance based on charisma and reputation
+			const baseChance =
+				intensity === "light"
+					? 0.5 + player.charisma * 0.05
+					: intensity === "medium"
+						? 0.35 + player.charisma * 0.06
+						: 0.2 + player.charisma * 0.07;
+
+			const successChance = Math.min(
+				0.85,
+				baseChance + player.reputation * 0.02,
+			);
+
+			// Calculate max attempts based on charisma
+			const maxAttempts =
+				intensity === "light"
+					? 2 + Math.floor(player.charisma / 2)
+					: intensity === "medium"
+						? 4 + Math.floor(player.charisma / 2)
+						: 6 + Math.floor(player.charisma / 2);
+
+			// Create a new marketing event
+			const newEvent: MarketingEvent = {
+				id: `marketing-${Date.now()}`,
+				type: eventType,
+				purpose: purpose,
+				name: displayName,
+				remainingHours: duration,
+				totalHours: duration,
+				successChance,
+				baseReward,
+				maxAttempts,
+				investmentAmount: investmentAmount > 0 ? investmentAmount : undefined,
+			};
+
+			console.log(
+				`Started ${displayName} ${purpose} event for ${duration} hours`,
+			);
+			if (investmentAmount > 0) {
+				console.log(`Additional investment: $${investmentAmount}`);
+			}
+
+			// Add event, deduct energy and investment amount
+			return {
+				...state,
+				marketingEvents: [...state.marketingEvents, newEvent],
+				player: {
+					...player,
+					energy: player.energy - energyCost,
+					money: player.money - investmentAmount,
+				},
+			};
+		}
+
 		case "RECRUIT": {
 			const targetNodeId = action.targetNodeId;
 
@@ -836,15 +1530,15 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			// Calculate recruitment chance based on player stats
 			// Recruiting power has the strongest effect
 			let baseChance =
-				BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.04; // Reduced from 0.06
+				BASE_RECRUITMENT_CHANCE + state.player.recruitingPower * 0.06; // Changed from 0.04
 			// Charisma no longer affects recruitment success
-			// Money provides a small boost
+			// Money provides a smaller boost
 			baseChance += state.player.money * MONEY_RECRUITMENT_FACTOR;
-			// Add small base bonus
-			baseChance += 0.02; // Reduced from 0.05
+			// Smaller base bonus
+			baseChance += 0.01; // Reduced from 0.02
 
-			// Cap at 75%
-			const recruitmentChance = Math.min(baseChance, 0.75); // Reduced from 0.9
+			// Cap at 65%
+			const recruitmentChance = Math.min(baseChance, 0.65); // Reduced from 0.75
 
 			// Add to pending recruits for processing at day cycle
 			const pendingRecruits = [
@@ -901,7 +1595,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 
 			// Check if player has enough recruits to move up
 			// Make it harder to move up levels - require more recruits per level
-			const requiredRecruits = Math.ceil((7 - targetNode.level) * 1.5); // Increased from just (7 - targetNode.level)
+			const requiredRecruits = Math.ceil((7 - targetNode.level) * 1.8); // Increased from 1.5
 			if (state.player.recruits < requiredRecruits) {
 				return state;
 			}
@@ -962,18 +1656,38 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 				return state;
 			}
 
-			// Calculate money to collect based on owned nodes
+			// Calculate money to collect based on owned nodes' money
+			// This money is generated from the sales their downstream nodes made
 			const ownedNodes = state.pyramid.nodes.filter(
 				(node) => node.ownedByPlayer,
 			);
-			const moneyToCollect = ownedNodes.reduce(
-				(sum, node) => sum + node.level * 20,
-				0,
-			);
+
+			// Collect money from all owned nodes and reset their money to 0
+			let moneyToCollect = 0;
+			const updatedNodes = state.pyramid.nodes.map((node) => {
+				if (node.ownedByPlayer && !node.isPlayerPosition && node.money > 0) {
+					moneyToCollect += node.money;
+					return {
+						...node,
+						money: 0, // Reset node money after collecting
+					};
+				}
+				return node;
+			});
+
+			// Update pyramid with the nodes that had their money collected
+			const updatedPyramid = {
+				...state.pyramid,
+				nodes: updatedNodes,
+				version: state.pyramid.version + 1,
+			};
+
+			console.log(`[COLLECT_MONEY] Collected $${moneyToCollect} from network`);
 
 			// Collect money without advancing time
 			return {
 				...state,
+				pyramid: updatedPyramid,
 				player: {
 					...state.player,
 					money: state.player.money + moneyToCollect,
@@ -1028,39 +1742,178 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			};
 		}
 
-		case "UPGRADE_RECRUITING": {
-			const upgradeCost = state.player.recruitingPower * 250;
+		case "BUY_PRODUCT": {
+			const { productId, quantity } = action;
 
-			if (state.player.money < upgradeCost) {
+			// Check if player has enough energy - buying product costs energy
+			if (state.player.energy < PRODUCT_BUY_ENERGY_COST) {
+				console.log(
+					`Not enough energy to buy products. Need ${PRODUCT_BUY_ENERGY_COST} energy.`,
+				);
 				return state;
 			}
 
-			// Upgrade recruiting power without advancing time
+			// Find the product
+			const product = state.products.find((p) => p.id === productId);
+			if (!product) {
+				console.error(`Product ${productId} not found`);
+				return state;
+			}
+
+			// Check if player has enough money
+			const totalCost = product.baseCost * quantity;
+			if (state.player.money < totalCost) {
+				console.log(
+					`Not enough money to buy ${quantity} ${product.name}. Need $${totalCost}`,
+				);
+				return state;
+			}
+
+			// Update player inventory
+			const currentQuantity = state.player.inventory[productId] || 0;
+			const updatedInventory = {
+				...state.player.inventory,
+				[productId]: currentQuantity + quantity,
+			};
+
 			return {
 				...state,
 				player: {
 					...state.player,
-					recruitingPower: state.player.recruitingPower + 1,
-					money: state.player.money - upgradeCost,
+					money: state.player.money - totalCost,
+					inventory: updatedInventory,
+					energy: state.player.energy - PRODUCT_BUY_ENERGY_COST, // Deduct energy for buying products
+				},
+				turns: state.turns + 1,
+			};
+		}
+
+		case "SELL_DOWNSTREAM": {
+			const { productId, targetNodeId, quantity } = action;
+
+			// Find the product
+			const product = state.products.find((p) => p.id === productId);
+			if (!product) {
+				console.error(`Product ${productId} not found`);
+				return state;
+			}
+
+			// Find the target node
+			const targetNodeIndex = state.pyramid.nodes.findIndex(
+				(node) => node.id === targetNodeId && node.ownedByPlayer,
+			);
+
+			if (targetNodeIndex === -1) {
+				console.error(
+					`Target node ${targetNodeId} not found or not owned by player`,
+				);
+				return state;
+			}
+
+			const targetNode = state.pyramid.nodes[targetNodeIndex];
+
+			// Check if player has enough inventory
+			const playerCurrentQuantity = state.player.inventory[productId] || 0;
+			if (playerCurrentQuantity < quantity) {
+				console.log(
+					`Not enough ${product.name} in inventory. Have ${playerCurrentQuantity}, need ${quantity}`,
+				);
+				return state;
+			}
+
+			// Check if target node has enough space
+			const targetCurrentQuantity = targetNode.inventory?.[productId] || 0;
+			const totalInventoryAfterSale =
+				Object.values(targetNode.inventory || {}).reduce(
+					(sum, qty) => sum + qty,
+					0,
+				) +
+				quantity -
+				targetCurrentQuantity;
+
+			if (totalInventoryAfterSale > targetNode.maxInventory) {
+				console.log(`Target downstream doesn't have enough inventory space`);
+				return state;
+			}
+
+			// Calculate revenue (discounted price for downstream sales)
+			const revenue = quantity * product.downsellPrice;
+
+			// Update player inventory
+			const updatedPlayerInventory = {
+				...state.player.inventory,
+				[productId]: playerCurrentQuantity - quantity,
+			};
+
+			// Update target node inventory
+			const updatedNodes = state.pyramid.nodes.map((node) => {
+				if (node.id === targetNodeId) {
+					const nodeInventory = node.inventory || {};
+
+					return {
+						...node,
+						inventory: {
+							...nodeInventory,
+							[productId]: (nodeInventory[productId] || 0) + quantity,
+						},
+						lastRestocked: Date.now(),
+					};
+				}
+				return node;
+			});
+
+			console.log(
+				`Manually sold ${quantity} ${product.name} to downstream for $${revenue}`,
+			);
+
+			return {
+				...state,
+				pyramid: {
+					...state.pyramid,
+					nodes: updatedNodes,
+					version: state.pyramid.version + 1,
+				},
+				player: {
+					...state.player,
+					money: state.player.money + revenue,
+					inventory: updatedPlayerInventory,
+					totalSalesDownstream: state.player.totalSalesDownstream + quantity,
 				},
 				turns: state.turns + 1,
 			};
 		}
 
 		case "REST": {
-			const hours = action.hours; // Either SHORT_REST_HOURS or LONG_REST_HOURS
+			const { hours } = action;
+			const { gameDay, gameHour } = state;
 
 			// Calculate when rest will end
-			const totalGameHours = state.gameDay * HOURS_PER_DAY + state.gameHour;
-			const restUntil = totalGameHours + hours;
+			const restUntil = gameDay * HOURS_PER_DAY + gameHour + hours;
 
-			// Start rest period (don't advance time immediately, time will pass naturally)
+			// Calculate a random energy recovery percentage between 60-100%
+			const recoveryPercentage = 0.6 + Math.random() * 0.4;
+
+			// Calculate energy gain based on rest duration and recovery percentage
+			// Longer rest = more energy, with some randomness
+			const energyGain = Math.min(
+				MAX_ENERGY - state.player.energy,
+				Math.ceil(hours * recoveryPercentage * 1.5), // Scaled to be more generous than previous system
+			);
+
+			console.log(
+				`Resting for ${hours} hours. Current energy: ${state.player.energy}, Gain: ${energyGain}, Recovery: ${Math.round(recoveryPercentage * 100)}%`,
+			);
+
+			// Advance time while resting
+			let updatedState = advanceGameTime(state, hours);
+
+			// Update player energy and resting status
 			return {
-				...state,
+				...updatedState,
 				player: {
-					...state.player,
-					isResting: true,
-					restUntil: restUntil,
+					...updatedState.player,
+					energy: Math.min(MAX_ENERGY, state.player.energy + energyGain),
+					isResting: false, // Player is done resting once the time has been advanced
 				},
 				turns: state.turns + 1,
 			};

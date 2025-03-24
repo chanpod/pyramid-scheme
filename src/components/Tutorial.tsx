@@ -102,6 +102,50 @@ const Tutorial: React.FC<TutorialProps> = ({ onClose }) => {
 				</Section>
 
 				<Section>
+					<SectionTitle>Getting Started</SectionTitle>
+					<Text>
+						You start at the bottom of the pyramid scheme. Your goal is to
+						recruit people below you, generate sales, and eventually climb to
+						the top position (Level 1).
+					</Text>
+					<Text>
+						You have limited energy points to perform actions. Some actions,
+						like recruiting, require energy. Energy replenishes over time, or
+						you can spend money to buy more.
+					</Text>
+				</Section>
+
+				<Section>
+					<SectionTitle>Network Marketing</SectionTitle>
+					<Text>
+						When you're low on money and products, hosting a marketing event can
+						help generate immediate cash. This should be viewed as a last resort
+						when you're in a tight spot, as it costs significant energy.
+					</Text>
+					<Text>Click the "Host an Event" button to see your options:</Text>
+					<Text>
+						<strong>Social Media Blitz:</strong> The most affordable option at 2
+						energy, with decent success rates. Create targeted posts across your
+						social networks.
+					</Text>
+					<Text>
+						<strong>Home Party:</strong> A medium-sized investment of 5 energy
+						with better potential returns. Host people at your home for
+						demonstrations.
+					</Text>
+					<Text>
+						<strong>Public Workshop:</strong> The most expensive at 8 energy but
+						offers the largest potential payouts. Rent a space for a large
+						promotional event.
+					</Text>
+					<Text>
+						All events' success rates are enhanced by your Charisma and
+						Reputation attributes, making these more effective as you progress
+						in the game.
+					</Text>
+				</Section>
+
+				<Section>
 					<SectionTitle>Game Mechanics</SectionTitle>
 					<List>
 						<ListItem>

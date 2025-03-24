@@ -69,6 +69,8 @@ export const addNodeToPyramid = (
 		recruits: 0,
 		isPlayerPosition: false,
 		ownedByPlayer: false,
+		inventory: {}, // Initialize empty inventory
+		maxInventory: 20, // Default inventory capacity
 	};
 
 	// Create a link from parent to new node
@@ -144,6 +146,8 @@ export const generatePyramid = (
 				ownedByPlayer: isPlayerNode, // Player starts owning their node
 				money: level * 10, // Nodes at higher levels are worth more
 				recruits: 0,
+				inventory: {}, // Initialize empty inventory
+				maxInventory: 20, // Default inventory capacity
 			});
 		}
 	}

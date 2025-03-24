@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import styled from "styled-components";
 import PyramidFlowGraph from "./components/PyramidFlowGraph";
 import PlayerStatsDisplay from "./components/PlayerStats";
@@ -88,12 +88,62 @@ const HeaderControls = styled.div`
 `;
 
 const TurnCounter = styled.div`
-  background-color: #f5f5f5;
-  border-radius: 4px;
-  padding: 8px 15px;
+  background: linear-gradient(to right, #2196F3, #03A9F4);
+  border-radius: 8px;
+  padding: 12px 20px;
   font-weight: bold;
-  color: #555;
-  display: inline-block;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  position: relative;
+  
+  &.pulse {
+    animation: pulse 0.6s ease-out;
+  }
+  
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.7);
+    }
+    70% {
+      box-shadow: 0 0 0 10px rgba(33, 150, 243, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(33, 150, 243, 0);
+    }
+  }
+`;
+
+const TimeIcon = styled.span`
+  margin-right: 10px;
+  font-size: 18px;
+`;
+
+const DayInfo = styled.span`
+  font-weight: bold;
+  margin-right: 10px;
+`;
+
+const TimeInfo = styled.span`
+  font-weight: bold;
+`;
+
+const RestingIndicator = styled.span`
+  background-color: #FFD54F;
+  color: #795548;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 10px;
+  font-size: 12px;
+  animation: blink 1.5s infinite;
+  
+  @keyframes blink {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+  }
 `;
 
 const Footer = styled.footer`
@@ -116,6 +166,8 @@ function App() {
 	const { gameState, dispatch } = useGameState();
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [showTutorial, setShowTutorial] = useState(true);
+	const [pulseClock, setPulseClock] = useState(false);
+	const prevHourRef = useRef(gameState.gameHour);
 
 	const playerNode =
 		gameState.pyramid.nodes.find((node) => node.isPlayerPosition) || null;
@@ -143,6 +195,16 @@ function App() {
 		setSelectedNodeId(nodeId);
 	};
 
+	// Effect to pulse the clock when time changes
+	useEffect(() => {
+		if (prevHourRef.current !== gameState.gameHour) {
+			setPulseClock(true);
+			const timer = setTimeout(() => setPulseClock(false), 600);
+			prevHourRef.current = gameState.gameHour;
+			return () => clearTimeout(timer);
+		}
+	}, [gameState.gameHour]);
+
 	return (
 		<AppContainer>
 			<Header>
@@ -152,9 +214,13 @@ function App() {
 					<TutorialButton onClick={() => setShowTutorial(true)}>
 						How To Play
 					</TutorialButton>
-					<TurnCounter>
-						Day {gameState.gameDay} - {formatTime(gameState.gameHour)}
-						{gameState.player.isResting && " (Resting)"}
+					<TurnCounter className={pulseClock ? "pulse" : ""}>
+						<TimeIcon>🕒</TimeIcon>
+						<DayInfo>Day {gameState.gameDay}</DayInfo>
+						<TimeInfo>{formatTime(gameState.gameHour)}</TimeInfo>
+						{gameState.player.isResting && (
+							<RestingIndicator>Resting</RestingIndicator>
+						)}
 					</TurnCounter>
 				</HeaderControls>
 			</Header>
@@ -179,6 +245,7 @@ function App() {
 						canRecruit={canRecruit}
 						playerStats={gameState.player}
 						dispatch={dispatch}
+						products={gameState.products}
 					/>
 				</CenterPanel>
 
@@ -189,6 +256,8 @@ function App() {
 						gameDay={gameState.gameDay}
 						gameHour={gameState.gameHour}
 						pendingRecruits={gameState.pendingRecruits}
+						products={gameState.products}
+						marketingEvents={gameState.marketingEvents}
 					/>
 				</RightPanel>
 			</GameContainer>
