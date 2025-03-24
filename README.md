@@ -1,46 +1,76 @@
-# Getting Started with Create React App
+# Pyramid Scheme: The Game
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A browser-based simulation game that lets you experience the mechanics of a pyramid scheme in a fun and educational way. Unlike real pyramid schemes, this game is actually winnable!
 
-## Available Scripts
+## Game Overview
 
-In the project directory, you can run:
+In Pyramid Scheme: The Game, you start near the bottom of a pyramid structure and must recruit others below you to gain enough influence and resources to move up in the hierarchy. Your ultimate goal is to reach the top of the pyramid.
 
-### `npm start`
+## Key Features
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+- Visual pyramid structure with interactive nodes
+- Time-based game mechanics with day/night cycle
+- Recruitment system with success chances based on your stats
+- Energy management system
+- Money collection and upgrade mechanics
+- Resting periods to recover energy
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+## Game Mechanics
 
-### `npm test`
+### Time System
+- The game operates on a day/hour system (24-hour days)
+- Each game hour advances automatically every second of real time
+- A full game day passes in about 24 seconds
+- Recruitment attempts are processed at the end of each day
+- Resting is the only action that locks you out based on time passage
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Actions
+- **Recruit**: Queue a recruitment attempt for someone below you (costs energy)
+- **Move Up**: Climb to a higher position in the pyramid (costs energy and recruits)
+- **Collect Money**: Collect money from your network (costs energy)
+- **Rest**: Take a short (8 hour) or long (16 hour) rest to recover energy. You cannot take any actions until the rest period ends.
+- **Upgrade Stats**: Improve your recruitment success chance (costs money)
 
-### `npm run build`
+## How to Play
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+1. **Clone the repository**
+   ```
+   git clone https://github.com/yourusername/pyramid-scheme.git
+   cd pyramid-scheme
+   ```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+2. **Install dependencies**
+   ```
+   pnpm install
+   ```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+3. **Start the development server**
+   ```
+   pnpm dev
+   ```
 
-### `npm run eject`
+4. **Open your browser** and navigate to http://localhost:5173
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+## Building for Production
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```
+pnpm build
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+## Technologies Used
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+- React with TypeScript
+- Vite
+- D3.js for visualization
+- Styled Components
 
-## Learn More
+## Development
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+- Node.js v18+
+- pnpm
+- Vite
+- TypeScript
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## License
+
+MIT
