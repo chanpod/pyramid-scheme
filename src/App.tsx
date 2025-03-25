@@ -240,6 +240,7 @@ function App() {
 						dispatch={dispatch}
 						pyramid={gameState.pyramid}
 						playerNodeId={playerNode?.id || null}
+						products={gameState.products}
 					/>
 				</LeftPanel>
 

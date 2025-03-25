@@ -4,6 +4,7 @@ import {
 	PlayerStats as PlayerStatsType,
 	GameAction,
 	PyramidGraph,
+	Product,
 } from "../types";
 import { getNodesBelow } from "../utils/pyramidGenerator";
 
@@ -18,6 +19,7 @@ interface PlayerStatsProps {
 	dispatch: React.Dispatch<GameAction>; // Add dispatch function to handle upgrades
 	pyramid: PyramidGraph; // Add pyramid to count potential recruits
 	playerNodeId: string | null; // Add player node ID to identify potential recruits
+	products?: Product[]; // Add products for rank display
 }
 
 const StatsContainer = styled.div`
@@ -292,12 +294,88 @@ const ProductCount = styled.span`
   color: #388e3c;
 `;
 
+const ProductRankSummary = styled.div`
+  margin-top: 15px;
+  background-color: #f5f5f5;
+  border-radius: 6px;
+  padding: 12px;
+`;
+
+const ProductRankTitle = styled.div`
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+`;
+
+const ProductRankList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const ProductRankItem = styled.div`
+  background-color: #fff;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+`;
+
+const ProductRankHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+`;
+
+const ProductRankName = styled.span`
+  color: #333;
+  font-weight: bold;
+`;
+
+const ProductRankBadge = styled.span<{ color: string }>`
+  background-color: ${(props) => props.color || "#ccc"};
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+`;
+
+const ProductRankProgress = styled.div`
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+`;
+
+const ProductRankBar = styled.div<{ progress: number }>`
+  height: 6px;
+  background-color: #e0e0e0;
+  border-radius: 3px;
+  margin-top: 3px;
+  overflow: hidden;
+  position: relative;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: ${(props) => Math.min(100, props.progress)}%;
+    background-color: #4CAF50;
+  }
+`;
+
 const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 	stats,
 	lastDailyEnergyBonus,
 	dispatch,
 	pyramid,
 	playerNodeId,
+	products,
 }) => {
 	const [showEnergyBonus, setShowEnergyBonus] = useState(false);
 
@@ -554,6 +632,78 @@ const PlayerStatsDisplay: React.FC<PlayerStatsProps> = ({
 						))}
 					</InventoryList>
 				</InventorySummary>
+			)}
+
+			{/* Add product rank summary if player has product purchases */}
+			{Object.entries(stats.productPurchases || {}).length > 0 && products && (
+				<ProductRankSummary>
+					<ProductRankTitle>
+						<StatIcon>🏆</StatIcon> Product Ranks
+					</ProductRankTitle>
+					<ProductRankList>
+						{Object.entries(stats.productPurchases || {}).map(
+							([productId, purchaseStats]) => {
+								// Find product details
+								const product = products.find((p) => p.id === productId);
+								if (!product || !product.ranks) return null;
+
+								// Get current rank
+								const currentRank = purchaseStats.currentRank;
+								const rankInfo =
+									currentRank > 0 ? product.ranks[currentRank - 1] : null;
+
+								// Calculate progress to next rank if not at max rank
+								let progress = 0;
+								let nextRankName = "None";
+								let nextRequirement = 0;
+
+								if (currentRank < (product.ranks?.length || 0)) {
+									const nextRank = product.ranks[currentRank];
+									nextRankName = nextRank.name;
+									// Scale requirement based on player level
+									const levelMultiplier = Math.pow(3, stats.level - 1);
+									nextRequirement = Math.ceil(
+										nextRank.weeklyRequirement * levelMultiplier,
+									);
+									progress =
+										(purchaseStats.weeklyPurchased / nextRequirement) * 100;
+								}
+
+								return (
+									<ProductRankItem key={productId}>
+										<ProductRankHeader>
+											<ProductRankName>{product.name}</ProductRankName>
+											{currentRank > 0 && rankInfo ? (
+												<ProductRankBadge color={rankInfo.color}>
+													{rankInfo.name}
+												</ProductRankBadge>
+											) : (
+												<ProductRankBadge color="#ccc">
+													Unranked
+												</ProductRankBadge>
+											)}
+										</ProductRankHeader>
+
+										{currentRank < (product.ranks?.length || 0) ? (
+											<>
+												<ProductRankProgress>
+													Next Rank: {nextRankName} (
+													{purchaseStats.weeklyPurchased}/{nextRequirement}{" "}
+													purchases)
+												</ProductRankProgress>
+												<ProductRankBar progress={progress} />
+											</>
+										) : currentRank > 0 ? (
+											<ProductRankProgress>
+												Maximum rank achieved!
+											</ProductRankProgress>
+										) : null}
+									</ProductRankItem>
+								);
+							},
+						)}
+					</ProductRankList>
+				</ProductRankSummary>
 			)}
 		</StatsContainer>
 	);

@@ -6,6 +6,7 @@ import {
 	PyramidGraph,
 	MarketingEvent,
 	PyramidNode,
+	Product,
 } from "../types";
 import {
 	generatePyramid,
@@ -81,6 +82,45 @@ const productDefinitions = [
 		basePrice: 120,
 		downsellPrice: 80,
 		baseChance: 0.05, // 15% base chance to sell to a random person (increased from 0.1)
+	},
+];
+
+// Constants for product ranks
+const PRODUCT_RANKS = [
+	{
+		level: 1,
+		name: "Bronze",
+		weeklyRequirement: 5,
+		bonusMultiplier: 1.1,
+		color: "#CD7F32",
+	},
+	{
+		level: 2,
+		name: "Silver",
+		weeklyRequirement: 10,
+		bonusMultiplier: 1.2,
+		color: "#C0C0C0",
+	},
+	{
+		level: 3,
+		name: "Gold",
+		weeklyRequirement: 15,
+		bonusMultiplier: 1.3,
+		color: "#FFD700",
+	},
+	{
+		level: 4,
+		name: "Platinum",
+		weeklyRequirement: 25,
+		bonusMultiplier: 1.5,
+		color: "#E5E4E2",
+	},
+	{
+		level: 5,
+		name: "Diamond",
+		weeklyRequirement: 40,
+		bonusMultiplier: 2.0,
+		color: "#B9F2FF",
 	},
 ];
 
@@ -175,6 +215,10 @@ const propagateOwnership = (
 
 // Create initial game state
 const createInitialGameState = (): GameState => {
+	// Initialize pyramid with just one node for the player at top
+	const initialRecruits = 0;
+	const playerNodeId = "player-node-0";
+
 	// Generate basic pyramid structure
 	const pyramid = generatePyramid(7, 5); // 7 levels total, player starts at level 5
 
@@ -189,12 +233,12 @@ const createInitialGameState = (): GameState => {
 	// Set up initial player stats
 	const initialPlayerStats: PlayerStats = {
 		money: 1000,
-		recruits: 0,
-		level: 5, // Start at level 5 of the pyramid
-		currentNodeId: "",
+		recruits: initialRecruits,
+		level: 1,
+		currentNodeId: playerNodeId,
 		charisma: 1,
 		recruitingPower: 1,
-		energy: MAX_ENERGY, // Start with full energy
+		energy: 10,
 		reputation: 1,
 		isResting: false,
 		restUntil: 0,
@@ -203,6 +247,7 @@ const createInitialGameState = (): GameState => {
 		maxInventory: DEFAULT_MAX_INVENTORY,
 		totalSalesRandom: 0,
 		totalSalesDownstream: 0,
+		productPurchases: {},
 	};
 
 	// Step 1: Place player at a node in level 5
@@ -512,6 +557,50 @@ const createInitialGameState = (): GameState => {
 		`AI distribution: ${aiCompetitors.map((ai) => ai.name + " (Level " + ai.level + ")").join(", ")}`,
 	);
 
+	// Create initial products with ranks
+	const products: Product[] = [
+		{
+			id: "vitamins",
+			name: "Essential Vitamins",
+			baseCost: 15,
+			basePrice: 30,
+			downsellPrice: 20,
+			baseChance: 0.6,
+			ranks: PRODUCT_RANKS,
+			playerRank: 0, // Start with no rank
+		},
+		{
+			id: "shakes",
+			name: "Protein Shakes",
+			baseCost: 20,
+			basePrice: 45,
+			downsellPrice: 30,
+			baseChance: 0.5,
+			ranks: PRODUCT_RANKS,
+			playerRank: 0,
+		},
+		{
+			id: "skincare",
+			name: "Premium Skincare",
+			baseCost: 30,
+			basePrice: 75,
+			downsellPrice: 50,
+			baseChance: 0.4,
+			ranks: PRODUCT_RANKS,
+			playerRank: 0,
+		},
+		{
+			id: "essential-oils",
+			name: "Essential Oils",
+			baseCost: 25,
+			basePrice: 60,
+			downsellPrice: 40,
+			baseChance: 0.45,
+			ranks: PRODUCT_RANKS,
+			playerRank: 0,
+		},
+	];
+
 	return {
 		pyramid,
 		player: {
@@ -519,6 +608,8 @@ const createInitialGameState = (): GameState => {
 			currentNodeId: playerNode?.id || "",
 			inventory: playerInventory,
 			recruits: initialRecruits,
+			// Initialize product purchases tracking
+			productPurchases: {},
 		},
 		gameLevel: 1,
 		turns: 0,
@@ -527,7 +618,7 @@ const createInitialGameState = (): GameState => {
 		gameOver: false,
 		isWinner: false,
 		lastDailyEnergyBonus: 0,
-		products: productDefinitions,
+		products,
 		marketingEvents: [], // Initialize empty marketing events array
 	};
 };
@@ -1260,27 +1351,24 @@ const processDayCycle = (state: GameState): GameState => {
 
 // Advance game time
 const advanceGameTime = (state: GameState, hours: number): GameState => {
-	let newHour = state.gameHour + hours;
-	let newDay = state.gameDay;
 	let updatedState = { ...state };
-	let dayChanged = false;
+	let newDay = state.gameDay;
+	let newHour = state.gameHour + hours;
 
-	// Handle day change
-	while (newHour >= HOURS_PER_DAY) {
-		newHour -= HOURS_PER_DAY;
-		newDay++;
-		dayChanged = true;
+	// Check for day rollover
+	while (newHour >= 24) {
+		newHour -= 24;
+		newDay += 1;
 	}
 
-	// If a day has changed, give player 3 free energy at the start of the day
-	if (dayChanged) {
-		// Add 3 energy at the start of each day, but don't exceed MAX_ENERGY
-		const currentEnergy = updatedState.player.energy;
-		const newEnergy = Math.min(currentEnergy + 3, MAX_ENERGY);
-
-		console.log(
-			`New day: Adding 3 energy. Before: ${currentEnergy}, After: ${newEnergy}`,
-		);
+	// Check for energy regeneration if not resting
+	if (!state.player.isResting) {
+		// Energy regenerates at a rate of +1 per 3 in-game hours
+		let newEnergy = state.player.energy;
+		const energyGain = Math.floor(hours / 3);
+		if (energyGain > 0) {
+			newEnergy = Math.min(MAX_ENERGY, newEnergy + energyGain);
+		}
 
 		updatedState = {
 			...updatedState,
@@ -1288,75 +1376,83 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 				...updatedState.player,
 				energy: newEnergy,
 			},
-			lastDailyEnergyBonus: Date.now(), // Set the timestamp when the bonus was given
 		};
+	}
 
-		// Now process day cycle for recruitment attempts, AI behavior, etc.
+	// Process daily energy bonus when the day changes
+	if (newDay > state.gameDay) {
+		const currentTimestamp = Date.now();
+		const hoursElapsed = Math.floor(
+			(currentTimestamp - state.lastDailyEnergyBonus) / (1000 * 60 * 60),
+		);
+
+		// If it has been at least 16 real-world hours since the last bonus
+		// This prevents players from burning through days too quickly to stack bonuses
+		if (hoursElapsed >= 16 || state.lastDailyEnergyBonus === 0) {
+			updatedState = {
+				...updatedState,
+				player: {
+					...updatedState.player,
+					energy: Math.min(MAX_ENERGY, updatedState.player.energy + 3),
+				},
+				lastDailyEnergyBonus: currentTimestamp,
+			};
+
+			console.log("[ENERGY] Daily energy bonus granted (+3)");
+		}
+
+		// Check if we have a week change (every 7 days)
+		const isWeekChange = Math.floor(newDay / 7) > Math.floor(state.gameDay / 7);
+		if (isWeekChange) {
+			console.log("[TIME] Week changed, processing weekly updates");
+			updatedState = processWeeklyUpdate(updatedState);
+		}
+
+		// Process day cycle (sales, recruits, etc.) for AI nodes
 		updatedState = processDayCycle(updatedState);
 
-		// Process player's automatic product sales to random people
+		// Also process random sales for the player based on their inventory
 		updatedState = processPlayerRandomSales(updatedState);
+
+		// For debugging, check player's position after day cycle
+		const playerNode = updatedState.pyramid.nodes.find(
+			(node) => node.isPlayerPosition,
+		);
+		console.log(
+			`[DAY COMPLETE] Player at node ${playerNode?.id}, level ${playerNode?.level}`,
+		);
 	}
 
 	// Process active marketing events
-	if (state.marketingEvents.length > 0) {
-		console.log(
-			`[DEBUG] Processing ${state.marketingEvents.length} active marketing events`,
-		);
-		const activeEvents = [...state.marketingEvents];
-		const completedEvents = [];
-		const updatedEvents = [];
+	const updatedEvents = [...updatedState.marketingEvents];
+	for (let i = 0; i < updatedEvents.length; i++) {
+		const event = updatedEvents[i];
+		// Reduce event hours
+		event.remainingHours = Math.max(0, event.remainingHours - hours);
 
-		for (let event of activeEvents) {
-			// Decrease remaining hours
-			event = {
-				...event,
-				remainingHours: event.remainingHours - hours,
-			};
-
-			// Check if event is completed
-			if (event.remainingHours <= 0) {
-				console.log(`[DEBUG] Marketing event "${event.name}" has completed!`);
-				completedEvents.push(event);
-			} else {
-				console.log(
-					`[DEBUG] Marketing event "${event.name}" has ${event.remainingHours} hours remaining`,
-				);
-				updatedEvents.push(event);
-			}
-		}
-
-		console.log(
-			`[DEBUG] Completed events: ${completedEvents.length}, Updated events: ${updatedEvents.length}`,
-		);
-
-		// Process completed events
-		if (completedEvents.length > 0) {
-			console.log(
-				`[DEBUG] Found ${completedEvents.length} completed marketing events to process`,
-			);
-			for (const event of completedEvents) {
-				console.log(
-					`[DEBUG] About to call processRecruitmentEvent for "${event.name}"`,
-				);
-				// For recruitment events, generate potential recruits
+		// If event is complete, process results
+		if (event.remainingHours <= 0) {
+			// Depending on the event purpose, handle results
+			if (event.purpose === "recruitment") {
+				// Process recruitment event and get the updated state
 				updatedState = processRecruitmentEvent(updatedState, event);
+				// Remove the completed event
+				updatedEvents.splice(i, 1);
+				i--;
 			}
+			// Add other purposes as needed
 		}
-
-		// Update remaining events
-		updatedState = {
-			...updatedState,
-			marketingEvents: updatedEvents,
-		};
 	}
 
-	// Return updated state with new time
-	return {
+	// Apply the updated marketing events list to the state
+	updatedState = {
 		...updatedState,
-		gameHour: newHour,
 		gameDay: newDay,
+		gameHour: newHour,
+		marketingEvents: updatedEvents,
 	};
+
+	return updatedState;
 };
 
 // Helper function to process player's random product sales
@@ -2034,6 +2130,14 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 		case "BUY_PRODUCT": {
 			const { productId, quantity } = action;
 
+			// Check if player has enough energy
+			if (state.player.energy < PRODUCT_BUY_ENERGY_COST) {
+				console.log(
+					`Not enough energy to buy products. Required: ${PRODUCT_BUY_ENERGY_COST}`,
+				);
+				return state;
+			}
+
 			// Find the product
 			const product = state.products.find((p) => p.id === productId);
 			if (!product) {
@@ -2046,46 +2150,93 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 
 			// Check if player has enough money
 			if (state.player.money < totalCost) {
-				console.log(
-					`Not enough money to buy ${quantity} ${product.name}. Cost: $${totalCost}`,
-				);
-				return state;
-			}
-
-			// Check if player has enough energy
-			if (state.player.energy < PRODUCT_BUY_ENERGY_COST) {
-				console.log(
-					`Not enough energy to buy products. Required: ${PRODUCT_BUY_ENERGY_COST}`,
-				);
+				console.log(`Not enough money to buy products. Cost: $${totalCost}`);
 				return state;
 			}
 
 			// Check if player has enough inventory space
-			const currentInventory = state.player.inventory;
-			const totalItems = Object.values(currentInventory).reduce(
-				(sum, qty) => sum + qty,
-				0,
-			);
-			const maxInventory = state.player.maxInventory || DEFAULT_MAX_INVENTORY;
-
-			// Calculate how much space we have available
-			const availableSpace = maxInventory - totalItems;
+			const currentInventoryCount = Object.values(
+				state.player.inventory,
+			).reduce((sum, count) => sum + count, 0);
+			const availableSpace = state.player.maxInventory - currentInventoryCount;
 
 			if (availableSpace < quantity) {
-				console.log(
-					`Not enough inventory space. Available: ${availableSpace}, Trying to buy: ${quantity}`,
-				);
+				console.log(`Not enough inventory space. Available: ${availableSpace}`);
 				return state;
 			}
 
-			// Update inventory
+			// Update player's inventory
 			const updatedInventory = { ...state.player.inventory };
 			updatedInventory[productId] =
 				(updatedInventory[productId] || 0) + quantity;
 
-			console.log(
-				`[PURCHASE] Bought ${quantity} ${product.name} for $${totalCost}`,
-			);
+			// Update product purchase stats for rank tracking
+			const updatedProductPurchases = { ...state.player.productPurchases };
+			const productStats = updatedProductPurchases[productId] || {
+				totalPurchased: 0,
+				weeklyPurchased: 0,
+				currentRank: 0,
+				lastPurchase: 0,
+			};
+
+			// Update purchase stats
+			productStats.totalPurchased += quantity;
+			productStats.weeklyPurchased += quantity;
+			productStats.lastPurchase = Date.now();
+
+			// Store updated stats
+			updatedProductPurchases[productId] = productStats;
+
+			// Check for rank progress
+			let currentRank = productStats.currentRank;
+			let newRank = currentRank;
+
+			// Calculate rank based on weekly purchases
+			for (let i = 0; i < PRODUCT_RANKS.length; i++) {
+				const rank = PRODUCT_RANKS[i];
+				// Scale requirement based on player level
+				const levelMultiplier = Math.pow(3, state.player.level - 1);
+				const scaledRequirement = Math.ceil(
+					rank.weeklyRequirement * levelMultiplier,
+				);
+
+				if (productStats.weeklyPurchased >= scaledRequirement) {
+					newRank = rank.level;
+				} else {
+					break;
+				}
+			}
+
+			// If rank changed, update rank and notify
+			if (newRank > currentRank) {
+				productStats.currentRank = newRank;
+				const rankName = PRODUCT_RANKS[newRank - 1]?.name || "Unknown Rank";
+				console.log(
+					`%c[RANK UP] You've achieved ${rankName} rank with ${product.name}!`,
+					"background: #FFD700; color: black; padding: 3px 6px; border-radius: 3px; font-weight: bold;",
+				);
+
+				// If reached a higher rank, add +1 to reputation
+				if (newRank > currentRank) {
+					// Reputation gains only for new ranks, not maintaining existing ones
+					const reputationGain = newRank > currentRank ? 1 : 0;
+
+					return {
+						...state,
+						player: {
+							...state.player,
+							inventory: updatedInventory,
+							money: state.player.money - totalCost,
+							energy: state.player.energy - PRODUCT_BUY_ENERGY_COST,
+							productPurchases: updatedProductPurchases,
+							reputation: state.player.reputation + reputationGain,
+						},
+						turns: state.turns + 1,
+					};
+				}
+			}
+
+			console.log(`[BUY] Bought ${quantity} ${product.name} for $${totalCost}`);
 
 			return {
 				...state,
@@ -2094,6 +2245,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 					inventory: updatedInventory,
 					money: state.player.money - totalCost,
 					energy: state.player.energy - PRODUCT_BUY_ENERGY_COST,
+					productPurchases: updatedProductPurchases,
 				},
 				turns: state.turns + 1,
 			};
@@ -2135,6 +2287,28 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 			// Check if target node is player-owned
 			if (!targetNode.ownedByPlayer) {
 				console.log("Can only sell to player-owned nodes");
+				return state;
+			}
+
+			// Calculate max quantity based on reputation and product rank
+			// Base selling capacity starts at 5
+			let maxSellingCapacity = 5;
+
+			// Add bonus from reputation (each point of reputation adds 2 to capacity)
+			maxSellingCapacity += state.player.reputation * 2;
+
+			// Add bonus from product rank if applicable
+			const playerProductStats = state.player.productPurchases?.[productId];
+			if (playerProductStats?.currentRank) {
+				// Each rank adds 5 to the capacity (rank 5 = +25 capacity)
+				maxSellingCapacity += playerProductStats.currentRank * 5;
+			}
+
+			// Check if attempting to sell more than allowed
+			if (quantity > maxSellingCapacity) {
+				console.log(
+					`Cannot sell more than ${maxSellingCapacity} items at once due to your current reputation and product rank`,
+				);
 				return state;
 			}
 
@@ -2503,10 +2677,31 @@ const processPlayerInventoryTrading = (
 		const product = state.products.find((p) => p.id === randomProductId);
 		if (!product) continue;
 
-		// Calculate how many we can trade (1-3 units, limited by player inventory)
-		const maxTradeQty = Math.min(3, playerInventory[randomProductId] || 0);
+		// Calculate maximum trading capacity based on player's reputation
+		// Base capacity starts at 5 items
+		const baseTradeCapacity = 5;
+		const reputationBonus = state.player.reputation * 2; // Each point of reputation adds 2 to capacity
+
+		// Check if player has product rank
+		const playerProductStats = state.player.productPurchases?.[randomProductId];
+		let rankBonus = 0;
+		if (playerProductStats?.currentRank) {
+			// Each rank adds 5 to capacity
+			rankBonus = playerProductStats.currentRank * 5;
+		}
+
+		// Calculate max trade quantity based on all factors
+		const maxTradeCapacity = baseTradeCapacity + reputationBonus + rankBonus;
+
+		// Calculate how many we can trade (limited by player inventory and node capacity)
+		const maxTradeQty = Math.min(
+			maxTradeCapacity,
+			playerInventory[randomProductId] || 0,
+		);
+
 		if (maxTradeQty <= 0) continue;
 
+		// Trade a random amount between 1 and maxTradeQty
 		const tradeQty = Math.max(1, Math.floor(Math.random() * maxTradeQty));
 
 		// Calculate payment amount (node pays base cost per unit)
@@ -2557,4 +2752,80 @@ const processPlayerInventoryTrading = (
 		updatedPlayerInventory: playerInventory,
 		moneyFromTrades,
 	};
+};
+
+// Function to update product ranks based on weekly purchases
+const updateProductRanks = (state: GameState): GameState => {
+	const updatedProductPurchases = { ...state.player.productPurchases };
+	const updatedProducts = [...state.products];
+
+	// For each product, check weekly purchase requirements
+	updatedProducts.forEach((product) => {
+		// Get player's current stats for this product
+		const productStats = updatedProductPurchases[product.id] || {
+			totalPurchased: 0,
+			weeklyPurchased: 0,
+			currentRank: 0,
+			lastPurchase: 0,
+		};
+
+		// Determine current rank based on weekly purchases
+		let newRank = 0;
+
+		// Check which rank requirements the player meets
+		for (let i = 0; i < PRODUCT_RANKS.length; i++) {
+			const rank = PRODUCT_RANKS[i];
+			// Calculate requirement based on player level (3x increase per level up the pyramid)
+			const levelMultiplier = Math.pow(3, state.player.level - 1);
+			const scaledRequirement = Math.ceil(
+				rank.weeklyRequirement * levelMultiplier,
+			);
+
+			if (productStats.weeklyPurchased >= scaledRequirement) {
+				newRank = rank.level;
+			} else {
+				// Stop checking higher ranks if current requirement not met
+				break;
+			}
+		}
+
+		// Update player's rank for this product
+		productStats.currentRank = newRank;
+
+		// Reset weekly purchases counter (this is called weekly)
+		productStats.weeklyPurchased = 0;
+
+		// Update product purchases tracking
+		updatedProductPurchases[product.id] = productStats;
+
+		// Update product's player rank
+		const productIndex = updatedProducts.findIndex((p) => p.id === product.id);
+		if (productIndex >= 0) {
+			updatedProducts[productIndex] = {
+				...updatedProducts[productIndex],
+				playerRank: newRank,
+			};
+		}
+	});
+
+	return {
+		...state,
+		player: {
+			...state.player,
+			productPurchases: updatedProductPurchases,
+		},
+		products: updatedProducts,
+	};
+};
+
+// Function to process weekly game update
+const processWeeklyUpdate = (state: GameState): GameState => {
+	console.log("[WEEKLY UPDATE] Processing weekly update");
+
+	// Update product ranks
+	const updatedState = updateProductRanks(state);
+
+	// TODO: Consider adding other weekly updates here
+
+	return updatedState;
 };

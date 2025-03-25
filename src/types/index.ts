@@ -36,6 +36,17 @@ export interface Product {
 	basePrice: number; // Price when selling to random people
 	downsellPrice: number; // Discounted price when selling to downstreams
 	baseChance: number; // Base chance to successfully sell to random person
+	ranks?: ProductRank[]; // Array of available ranks for this product
+	playerRank?: number; // Current rank of the player with this product (1-5)
+}
+
+// Interface for product ranks
+export interface ProductRank {
+	level: number; // Rank level (1-5)
+	name: string; // Rank name (e.g. "Bronze Seller", "Silver Seller", etc.)
+	weeklyRequirement: number; // Number of units required to buy per week to maintain this rank
+	bonusMultiplier: number; // Multiplier for sales when at this rank
+	color: string; // Color code for badge display
 }
 
 // Marketing event interface for time-based events
@@ -67,7 +78,16 @@ export interface PlayerStats {
 	inventory: { [productId: string]: number }; // Product inventory counts
 	maxInventory: number; // Maximum inventory capacity
 	totalSalesRandom: number; // Total lifetime sales to random people
-	totalSalesDownstream: number; // Total lifetime sales to downstreams
+	totalSalesDownstream: number; // Total lifetime sales to downstream
+	productPurchases: { [productId: string]: ProductPurchaseStats }; // Track purchases for product ranks
+}
+
+// Interface to track product purchase stats for rank requirements
+export interface ProductPurchaseStats {
+	totalPurchased: number; // Lifetime total purchased
+	weeklyPurchased: number; // Purchased this week (resets weekly)
+	currentRank: number; // Current rank (1-5)
+	lastPurchase: number; // Timestamp of last purchase
 }
 
 export interface GameState {
