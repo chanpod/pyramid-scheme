@@ -7,6 +7,8 @@ import {
 	MarketingEvent,
 	PyramidNode,
 	Product,
+	ProductPurchaseStats,
+	ProductRank,
 } from "../types";
 import {
 	generatePyramid,
@@ -24,17 +26,17 @@ const REST_ENERGY_PER_HOUR = 0.5; // Energy gained per hour of rest
 const ENERGY_COST = 800; // Cost to buy energy
 const INVENTORY_UPGRADE_COST = 1000; // Cost to upgrade inventory capacity (fairly expensive)
 export const PRODUCT_BUY_ENERGY_COST = 5; // Energy cost to buy products
-const AI_NODE_RECRUIT_CHANCE = 0.3; // Increased AI node recruitment chance to make competition harder
-const AI_NODE_EXPANSION_CHANCE = 0.4; // Increased AI expansion chance to make competition harder
-const DEFAULT_MAX_INVENTORY = 10; // Default maximum inventory capacity for nodes
+const AI_NODE_RECRUIT_CHANCE = 0.1; // Increased AI node recruitment chance to make competition harder
+const AI_NODE_EXPANSION_CHANCE = 0.3; // Increased AI expansion chance to make competition harder
+const DEFAULT_MAX_INVENTORY = 20; // Default maximum inventory capacity for nodes
 const NODE_RESTOCK_ENERGY_COST = 1; // Energy cost to restock a downstream node
 
 // Trading chance constants - easy to adjust
 const PLAYER_INVENTORY_TRADE_CHANCE = 1; // Chance for player to auto-trade inventory to downstream nodes
-const AI_INVENTORY_TRADE_CHANCE = 0.5; // Chance for AI to auto-trade inventory to downstream nodes
+const AI_INVENTORY_TRADE_CHANCE = 0.3; // Chance for AI to auto-trade inventory to downstream nodes
 
 // Selling chance constants - easy to adjust
-const NODE_RANDOM_SALE_CHANCE = 0.1; // Base chance for nodes to sell products to random customers
+const NODE_RANDOM_SALE_CHANCE = 0.05; // Base chance for nodes to sell products to random customers
 const NODE_SALE_LEVEL_BONUS = 0.05; // Additional sale chance per level (higher levels sell better)
 const PLAYER_OWNED_SALE_BONUS = 0.1; // 10% bonus for player-owned nodes
 const CHARISMA_SALE_BONUS = 0.05; // 5% bonus per charisma point for player sales
@@ -129,6 +131,8 @@ const propagateOwnership = (
 	pyramid: PyramidGraph,
 	startNodeId: string,
 	isPlayer: boolean = true,
+	aiName?: string,
+	aiStrategy?: string,
 ): PyramidGraph => {
 	const updatedNodes = [...pyramid.nodes];
 	const processed = new Set<string>();
@@ -174,6 +178,8 @@ const propagateOwnership = (
 							...updatedNodes[childNodeIndex],
 							ownedByPlayer: true,
 							aiControlled: false, // Remove from AI network if it was there
+							aiStrategy: undefined, // Clear AI strategy
+							name: undefined, // Clear AI name
 							lastUpdated: Date.now(),
 						};
 
@@ -184,13 +190,18 @@ const propagateOwnership = (
 						}
 					}
 				} else {
-					// For AI network (not modified)
-					if (!updatedNodes[childNodeIndex].ownedByPlayer) {
-						// Don't take over player nodes
+					// For AI network
+					if (
+						!updatedNodes[childNodeIndex].ownedByPlayer &&
+						!updatedNodes[childNodeIndex].aiControlled
+					) {
+						// Don't take over player nodes or other AI's nodes
 						updatedNodes[childNodeIndex] = {
 							...updatedNodes[childNodeIndex],
 							aiControlled: true,
 							ownedByPlayer: false,
+							aiStrategy: aiStrategy,
+							name: aiName ? `${aiName}'s Recruit` : "AI Recruit",
 							lastUpdated: Date.now(),
 						};
 
@@ -216,11 +227,11 @@ const propagateOwnership = (
 // Create initial game state
 const createInitialGameState = (): GameState => {
 	// Initialize pyramid with just one node for the player at top
-	const initialRecruits = 0;
+	let initialRecruits = 0;
 	const playerNodeId = "player-node-0";
 
 	// Generate basic pyramid structure
-	const pyramid = generatePyramid(7, 5); // 7 levels total, player starts at level 5
+	let pyramid = generatePyramid(7, 5); // 7 levels total, player starts at level 5
 
 	// Clear any existing player/AI positions and ownership
 	pyramid.nodes.forEach((node) => {
@@ -249,6 +260,32 @@ const createInitialGameState = (): GameState => {
 		totalSalesDownstream: 0,
 		productPurchases: {},
 	};
+
+	// Helper to check if one node is below another in the hierarchy
+	function isNodeBelow(
+		pyramid: PyramidGraph,
+		nodeId: string,
+		ancestorId: string,
+		visited: Set<string> = new Set(),
+	): boolean {
+		if (visited.has(nodeId)) return false; // Prevent cycles
+		visited.add(nodeId);
+
+		// Get direct parents of this node
+		const parents = pyramid.links
+			.filter((link) => link.source === nodeId)
+			.map((link) => link.target);
+
+		// Check if any parent is the ancestor we're looking for
+		if (parents.includes(ancestorId)) return true;
+
+		// Recursively check each parent
+		for (const parentId of parents) {
+			if (isNodeBelow(pyramid, parentId, ancestorId, visited)) return true;
+		}
+
+		return false;
+	}
 
 	// Step 1: Place player at a node in level 5
 	const level5Nodes = pyramid.nodes.filter((node) => node.level === 5);
@@ -338,19 +375,25 @@ const createInitialGameState = (): GameState => {
 	// Shuffle the possible nodes to randomize AI placement
 	const shuffledAINodes = [...possibleAINodes].sort(() => Math.random() - 0.5);
 
-	// Create AI competitors
+	// Place AI competitors
 	for (let i = 0; i < Math.min(numAICompetitors, shuffledAINodes.length); i++) {
+		// Get a random node for this AI competitor
 		const aiNode = shuffledAINodes[i];
-		const aiName = `Competitor ${i + 1}`;
+
+		// Generate a name for this AI competitor
+		const aiName = generateAIName();
+
+		// Assign a strategy (50/50 chance of aggressive vs steady)
 		const aiStrategy = Math.random() < 0.5 ? "aggressive" : "steady";
 
+		// Mark the node as AI-controlled
 		aiNode.aiControlled = true;
 		aiNode.name = aiName;
 		aiNode.aiStrategy = aiStrategy;
 		aiNode.maxInventory = DEFAULT_MAX_INVENTORY;
 
-		// Initialize AI inventory with a few products
-		aiNode.inventory = {};
+		// Initialize AI inventory
+		aiNode.inventory = aiNode.inventory || {};
 
 		// Higher-level AI competitors start with more inventory and money
 		const startingMoney =
@@ -381,9 +424,45 @@ const createInitialGameState = (): GameState => {
 		});
 
 		console.log(`AI competitor ${aiName} placed at level ${aiNode.level}`);
+
+		// Propagate AI ownership down the hierarchy
+		pyramid = propagateOwnership(pyramid, aiNode.id, false, aiName, aiStrategy);
 	}
 
-	// Step 3: Assign nodes to networks based on hierarchy
+	// Step 3: Assign any remaining unowned nodes randomly
+	const unownedNodes = pyramid.nodes.filter(
+		(node) => !node.ownedByPlayer && !node.aiControlled,
+	);
+
+	if (unownedNodes.length > 0) {
+		console.log(`Assigning ${unownedNodes.length} remaining unowned nodes`);
+
+		for (const node of unownedNodes) {
+			// For nodes below the player, give higher chance to be player-owned
+			const isBelow = isNodeBelow(pyramid, node.id, playerNode.id);
+
+			// Only assign to player if it's below the player's position
+			if (isBelow) {
+				node.ownedByPlayer = true;
+				node.maxInventory = DEFAULT_MAX_INVENTORY;
+				node.inventory = {};
+			} else {
+				node.aiControlled = true;
+				// Pick a random AI competitor to own this node
+				const randomAI =
+					aiCompetitors[Math.floor(Math.random() * aiCompetitors.length)];
+				node.aiStrategy = randomAI.strategy;
+				node.name = `${randomAI.name}'s Recruit`;
+				// Initialize with empty inventory
+				node.inventory = {};
+				node.maxInventory = DEFAULT_MAX_INVENTORY;
+				// Give some starting money
+				node.money = 50 + Math.floor(Math.random() * 150);
+			}
+		}
+	}
+
+	// Step 4: Assign nodes to networks based on hierarchy
 	// First pass: assign all nodes directly connected (below) to owned nodes
 	let assignedSomeNodes = true;
 	while (assignedSomeNodes) {
@@ -432,70 +511,11 @@ const createInitialGameState = (): GameState => {
 		}
 	}
 
-	// Step 4: Assign any remaining unowned nodes randomly
-	const unownedNodes = pyramid.nodes.filter(
-		(node) => !node.ownedByPlayer && !node.aiControlled,
-	);
-
-	if (unownedNodes.length > 0) {
-		console.log(`Assigning ${unownedNodes.length} remaining unowned nodes`);
-
-		for (const node of unownedNodes) {
-			// For nodes below the player, give higher chance to be player-owned
-			const isBelow = isNodeBelow(pyramid, node.id, playerNode.id);
-
-			// Only assign to player if it's below the player's position
-			if (isBelow) {
-				node.ownedByPlayer = true;
-				node.maxInventory = DEFAULT_MAX_INVENTORY;
-				node.inventory = {};
-			} else {
-				node.aiControlled = true;
-				// Pick a random AI competitor to own this node
-				const randomAI =
-					aiCompetitors[Math.floor(Math.random() * aiCompetitors.length)];
-				node.aiStrategy = randomAI.strategy;
-				node.name = `${randomAI.name}'s Recruit`;
-				// Initialize with empty inventory
-				node.inventory = {};
-				node.maxInventory = DEFAULT_MAX_INVENTORY;
-				// Give some starting money
-				node.money = 50 + Math.floor(Math.random() * 150);
-			}
-		}
-	}
-
-	// Helper to check if one node is below another in the hierarchy
-	function isNodeBelow(
-		pyramid: PyramidGraph,
-		nodeId: string,
-		ancestorId: string,
-		visited: Set<string> = new Set(),
-	): boolean {
-		if (visited.has(nodeId)) return false; // Prevent cycles
-		visited.add(nodeId);
-
-		// Get direct parents of this node
-		const parents = pyramid.links
-			.filter((link) => link.source === nodeId)
-			.map((link) => link.target);
-
-		// Check if any parent is the ancestor we're looking for
-		if (parents.includes(ancestorId)) return true;
-
-		// Recursively check each parent
-		for (const parentId of parents) {
-			if (isNodeBelow(pyramid, parentId, ancestorId, visited)) return true;
-		}
-
-		return false;
-	}
-
 	// Add version number to track changes
 	pyramid.version = 1;
 
 	// Initialize player inventory with some product
-	const playerInventory = {};
+	const playerInventory: { [productId: string]: number } = {};
 	productDefinitions.forEach((product) => {
 		playerInventory[product.id] = 5; // Start with 5 of each product
 	});
@@ -509,7 +529,7 @@ const createInitialGameState = (): GameState => {
 	);
 
 	// Instead of just unmarking excess nodes, we'll remove them completely
-	let initialRecruits = playerOwnedNodes.length;
+	initialRecruits = playerOwnedNodes.length;
 
 	// If we have more than 2 owned nodes, we need to remove the excess nodes
 	if (initialRecruits > 2) {
@@ -601,6 +621,42 @@ const createInitialGameState = (): GameState => {
 		},
 	];
 
+	// Initialize product purchase stats tracking
+	const productPurchases: { [productId: string]: ProductPurchaseStats } = {};
+	products.forEach((product) => {
+		productPurchases[product.id] = {
+			totalPurchased: 0,
+			weeklyPurchased: 0,
+			currentRank: 0,
+			lastPurchase: 0,
+		};
+	});
+	initialPlayerStats.productPurchases = productPurchases;
+
+	// Ensure proper AI network hierarchy by propagating ownership from all AI competitor roots
+	// This ensures each AI network follows the correct inheritance structure
+	for (const aiCompetitor of aiCompetitors) {
+		// Find the AI competitor node
+		const aiRootNode = pyramid.nodes.find(
+			(node) => node.id === aiCompetitor.id,
+		);
+		if (aiRootNode) {
+			// Propagate ownership from this root node
+			pyramid = propagateOwnership(
+				pyramid,
+				aiRootNode.id,
+				false,
+				aiRootNode.name,
+				aiRootNode.aiStrategy,
+			);
+
+			console.log(
+				`Propagated AI ownership from ${aiRootNode.name} to downstream nodes`,
+			);
+		}
+	}
+
+	// Return the initial game state
 	return {
 		pyramid,
 		player: {
@@ -608,8 +664,7 @@ const createInitialGameState = (): GameState => {
 			currentNodeId: playerNode?.id || "",
 			inventory: playerInventory,
 			recruits: initialRecruits,
-			// Initialize product purchases tracking
-			productPurchases: {},
+			productPurchases: productPurchases,
 		},
 		gameLevel: 1,
 		turns: 0,
@@ -619,7 +674,7 @@ const createInitialGameState = (): GameState => {
 		isWinner: false,
 		lastDailyEnergyBonus: 0,
 		products,
-		marketingEvents: [], // Initialize empty marketing events array
+		marketingEvents: [],
 	};
 };
 
@@ -850,7 +905,7 @@ const processDayCycle = (state: GameState): GameState => {
 		};
 	});
 
-	// 2. Process AI recruitment behavior (keeping existing logic)
+	// 2. Process AI recruitment behavior
 	// Make the AI more competitive by giving them a chance to recruit nodes
 	const aiChanceToRecruit = AI_NODE_RECRUIT_CHANCE; // Chance for AI to try recruiting
 	const shouldAIRecruit = Math.random() < aiChanceToRecruit;
@@ -888,11 +943,19 @@ const processDayCycle = (state: GameState): GameState => {
 				if (parentNodeIndex >= 0) {
 					// Mark the parent as AI controlled if it's not player-owned
 					if (!updatedNodes[parentNodeIndex].ownedByPlayer) {
+						// If the parent is not already AI controlled, create a new AI identity
+						const aiStrategy = Math.random() < 0.5 ? "aggressive" : "steady";
+						const aiName = updatedNodes[parentNodeIndex].aiControlled
+							? updatedNodes[parentNodeIndex].name
+							: `Competitor ${Math.floor(Math.random() * 1000)}`;
+
 						updatedNodes[parentNodeIndex] = {
 							...updatedNodes[parentNodeIndex],
 							aiControlled: true,
-							aiStrategy: Math.random() < 0.5 ? "aggressive" : "steady",
-							name: `Competitor ${Math.floor(Math.random() * 1000)}`,
+							aiStrategy: updatedNodes[parentNodeIndex].aiControlled
+								? updatedNodes[parentNodeIndex].aiStrategy
+								: aiStrategy,
+							name: aiName,
 							lastUpdated: Date.now(),
 							inventory: updatedNodes[parentNodeIndex].inventory || {},
 							maxInventory: DEFAULT_MAX_INVENTORY,
@@ -905,12 +968,14 @@ const processDayCycle = (state: GameState): GameState => {
 					);
 
 					if (nodeIndex >= 0) {
+						const parentNode = updatedNodes[parentNodeIndex];
+
 						// Mark the target node as AI controlled
 						updatedNodes[nodeIndex] = {
 							...updatedNodes[nodeIndex],
 							aiControlled: true,
-							aiStrategy: updatedNodes[parentNodeIndex].aiStrategy,
-							name: `${updatedNodes[parentNodeIndex].name}'s Recruit`,
+							aiStrategy: parentNode.aiStrategy,
+							name: `${parentNode.name}'s Recruit`,
 							lastUpdated: Date.now(),
 							inventory: {}, // Initialize empty inventory
 							maxInventory: DEFAULT_MAX_INVENTORY,
@@ -921,6 +986,27 @@ const processDayCycle = (state: GameState): GameState => {
 						console.log(
 							`[AI RECRUITMENT] AI recruited node at level ${targetNode.level}, ID: ${targetNode.id}`,
 						);
+
+						// Build updated pyramid with newly added AI node
+						updatedPyramid = {
+							...updatedPyramid,
+							nodes: updatedNodes,
+							links: updatedLinks,
+						};
+
+						// Propagate ownership from the parent node to ensure all child nodes
+						// are properly assigned to the same AI network
+						updatedPyramid = propagateOwnership(
+							updatedPyramid,
+							parentId,
+							false,
+							parentNode.name,
+							parentNode.aiStrategy,
+						);
+
+						// Update node references after propagation
+						updatedNodes = updatedPyramid.nodes;
+						updatedLinks = updatedPyramid.links;
 
 						// Add AI expansion behavior
 						if (Math.random() < AI_NODE_EXPANSION_CHANCE) {
@@ -937,6 +1023,19 @@ const processDayCycle = (state: GameState): GameState => {
 							console.log(
 								`[AI EXPANSION] AI added new potential recruit node below ${targetNode.id}`,
 							);
+
+							// Re-propagate ownership after adding new node
+							updatedPyramid = propagateOwnership(
+								updatedPyramid,
+								parentId,
+								false,
+								parentNode.name,
+								parentNode.aiStrategy,
+							);
+
+							// Update node references again
+							updatedNodes = updatedPyramid.nodes;
+							updatedLinks = updatedPyramid.links;
 						}
 					}
 				}
@@ -2828,4 +2927,48 @@ const processWeeklyUpdate = (state: GameState): GameState => {
 	// TODO: Consider adding other weekly updates here
 
 	return updatedState;
+};
+
+// Generate a random name for AI competitors
+const generateAIName = (): string => {
+	const firstNames = [
+		"Alpha",
+		"Beta",
+		"Delta",
+		"Omega",
+		"Golden",
+		"Supreme",
+		"Ultra",
+		"Mega",
+		"Perfect",
+		"Power",
+		"Peak",
+		"Prime",
+		"Elite",
+		"Vital",
+		"Global",
+		"Optimum",
+	];
+
+	const lastNames = [
+		"Health",
+		"Wellness",
+		"Life",
+		"Living",
+		"Vitality",
+		"Nutrition",
+		"Success",
+		"Future",
+		"Balance",
+		"Harmony",
+		"Essence",
+		"Network",
+		"Alliance",
+		"Partners",
+	];
+
+	const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+	const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+
+	return `${firstName} ${lastName}`;
 };
