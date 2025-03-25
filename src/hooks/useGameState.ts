@@ -5,6 +5,7 @@ import {
 	PlayerStats,
 	PyramidGraph,
 	MarketingEvent,
+	PyramidNode,
 } from "../types";
 import {
 	generatePyramid,
@@ -16,7 +17,7 @@ import {
 import React from "react";
 
 // Constants for game mechanics
-const HOURS_PER_DAY = 24;
+const HOURS_PER_DAY = 3;
 const MAX_ENERGY = 20;
 const REST_ENERGY_PER_HOUR = 0.5; // Energy gained per hour of rest
 const ENERGY_COST = 800; // Cost to buy energy
@@ -28,11 +29,11 @@ const DEFAULT_MAX_INVENTORY = 10; // Default maximum inventory capacity for node
 const NODE_RESTOCK_ENERGY_COST = 1; // Energy cost to restock a downstream node
 
 // Trading chance constants - easy to adjust
-const PLAYER_INVENTORY_TRADE_CHANCE = 0.5; // Chance for player to auto-trade inventory to downstream nodes
+const PLAYER_INVENTORY_TRADE_CHANCE = 1; // Chance for player to auto-trade inventory to downstream nodes
 const AI_INVENTORY_TRADE_CHANCE = 0.5; // Chance for AI to auto-trade inventory to downstream nodes
 
 // Selling chance constants - easy to adjust
-const NODE_RANDOM_SALE_CHANCE = 0.3; // Base chance for nodes to sell products to random customers
+const NODE_RANDOM_SALE_CHANCE = 0.1; // Base chance for nodes to sell products to random customers
 const NODE_SALE_LEVEL_BONUS = 0.05; // Additional sale chance per level (higher levels sell better)
 const PLAYER_OWNED_SALE_BONUS = 0.1; // 10% bonus for player-owned nodes
 const CHARISMA_SALE_BONUS = 0.05; // 5% bonus per charisma point for player sales
@@ -233,6 +234,7 @@ const createInitialGameState = (): GameState => {
 	if (playerNode) {
 		playerNode.isPlayerPosition = true;
 		playerNode.ownedByPlayer = true;
+		playerNode.inventory = undefined; // Player node doesn't need inventory - using player stats instead
 		initialPlayerStats.currentNodeId = playerNode.id;
 		console.log(
 			`Player randomly placed at node ${playerNode.id} on level ${playerNode.level} (position ${playerNodeIndex + 1} of ${level5Nodes.length})`,
@@ -471,6 +473,9 @@ const createInitialGameState = (): GameState => {
 	productDefinitions.forEach((product) => {
 		playerInventory[product.id] = 5; // Start with 5 of each product
 	});
+
+	// Set the inventory in player stats (single source of truth)
+	initialPlayerStats.inventory = playerInventory;
 
 	// Calculate initial recruit count based on owned nodes
 	const playerOwnedNodes = pyramid.nodes.filter(
@@ -941,44 +946,95 @@ const processDayCycle = (state: GameState): GameState => {
 							);
 
 							if (tradeQuantity > 0) {
-								// Update seller's inventory
-								const sellerNodeIndex = nodesAfterTrading.findIndex(
-									(n) => n.id === aiNode.id,
-								);
-								const sellerInventory = {
-									...nodesAfterTrading[sellerNodeIndex].inventory,
-								};
-								sellerInventory[randomProductId] = Math.max(
-									0,
-									(sellerInventory[randomProductId] || 0) - tradeQuantity,
-								);
+								// Calculate payment from downstream node to player (wholesale price)
+								// Use the downsellPrice as the wholesale price - this is what downstream nodes pay
+								const paymentAmount = product.downsellPrice * tradeQuantity;
 
-								// Update buyer's inventory
-								const buyerInventory = { ...targetInventory };
-								buyerInventory[randomProductId] =
-									(buyerInventory[randomProductId] || 0) + tradeQuantity;
+								// Check if downstream node has enough money
+								const nodeHasMoney =
+									(updatedNodes[targetNodeIndex].money || 0) >= paymentAmount;
 
-								// Even trade - no money exchanges hands in trading phase
-								// Update seller
-								nodesAfterTrading[sellerNodeIndex] = {
-									...nodesAfterTrading[sellerNodeIndex],
-									inventory: sellerInventory,
-									lastUpdated: Date.now(),
-								};
+								if (nodeHasMoney) {
+									// AI node trading - we don't modify player inventory here
+									// Instead, transfer products between AI nodes
 
-								// Update buyer
-								nodesAfterTrading[targetNodeIndex] = {
-									...nodesAfterTrading[targetNodeIndex],
-									inventory: buyerInventory,
-									lastUpdated: Date.now(),
-								};
+									// Get the current inventory of the AI node
+									const updatedAINodeInventory = {
+										...(aiNode.inventory || {}),
+									};
 
+									// Reduce inventory in source node
+									updatedAINodeInventory[randomProductId] = Math.max(
+										0,
+										(updatedAINodeInventory[randomProductId] || 0) -
+											tradeQuantity,
+									);
+
+									// Find the AI node index to update
+									const aiNodeIndex = updatedNodes.findIndex(
+										(n) => n.id === aiNode.id,
+									);
+									if (aiNodeIndex >= 0) {
+										updatedNodes[aiNodeIndex] = {
+											...updatedNodes[aiNodeIndex],
+											inventory: updatedAINodeInventory,
+											lastUpdated: Date.now(),
+										};
+									}
+
+									// Update target node's inventory
+									const updatedTargetInventory = { ...targetInventory };
+									updatedTargetInventory[randomProductId] =
+										(updatedTargetInventory[randomProductId] || 0) +
+										tradeQuantity;
+
+									// Transfer money from node to AI node
+									updatedNodes[targetNodeIndex] = {
+										...updatedNodes[targetNodeIndex],
+										inventory: updatedTargetInventory,
+										money:
+											(updatedNodes[targetNodeIndex].money || 0) -
+											paymentAmount,
+										lastUpdated: Date.now(),
+									};
+
+									// Add money to the AI node that sold the products
+									if (aiNodeIndex >= 0) {
+										updatedNodes[aiNodeIndex] = {
+											...updatedNodes[aiNodeIndex],
+											money:
+												(updatedNodes[aiNodeIndex].money || 0) + paymentAmount,
+											lastUpdated: Date.now(),
+										};
+									}
+
+									console.log(
+										`[AI TRADE] ${aiNode.name || "AI Node"} sold ${tradeQuantity} ${product.name} to ${nodesAfterTrading[targetNodeIndex].name || "another node"} for $${paymentAmount}`,
+									);
+								} else {
+									console.log(
+										`[DEBUG TRADING] Node has insufficient funds ($${updatedNodes[targetNodeIndex].money || 0}) to purchase ${tradeQuantity} ${product.name} for $${paymentAmount}`,
+									);
+								}
+							} else {
 								console.log(
-									`[INVENTORY TRADE] ${aiNode.name || "AI Node"} traded ${tradeQuantity} ${product.name} to ${nodesAfterTrading[targetNodeIndex].name || "downstream"}`,
+									`[DEBUG TRADING] Trade quantity was 0, no trade occurred`,
 								);
 							}
+						} else {
+							console.log(
+								`[DEBUG TRADING] Target node has no available space for new inventory`,
+							);
 						}
+					} else {
+						console.log(
+							`[DEBUG TRADING] Target node not found in pyramid nodes`,
+						);
 					}
+				} else {
+					console.log(
+						`[DEBUG TRADING] Product not found for ID: ${randomProductId} or quantity is 0`,
+					);
 				}
 			}
 		}
@@ -990,212 +1046,25 @@ const processDayCycle = (state: GameState): GameState => {
 	console.log(
 		`[DEBUG TRADING] Player node found: ${!!playerNode}, Node ID: ${playerNode?.id}`,
 	);
-	console.log(
-		`[DEBUG TRADING] Player node inventory:`,
-		playerNode?.inventory ? JSON.stringify(playerNode.inventory) : "none",
+
+	// Process player inventory trading using the player stats inventory as source of truth
+	const tradingResult = processPlayerInventoryTrading(
+		updatedPyramid,
+		playerNode || { id: "player-fallback", isPlayerPosition: true },
+		nodesAfterTrading,
+		state,
 	);
 
-	// Check if player node exists in original state - this is important for comparison
-	const originalPlayerNode = state.pyramid.nodes.find(
-		(node) => node.isPlayerPosition,
-	);
-	console.log(
-		`[DEBUG TRADING] Original player node inventory:`,
-		originalPlayerNode?.inventory
-			? JSON.stringify(originalPlayerNode.inventory)
-			: "none",
-	);
-
-	if (playerNode?.inventory) {
-		// Find nodes directly below the player
-		const playerNodesBelow = getNodesBelow(updatedPyramid, playerNode.id);
-		const playerOwnedNodesBelow = playerNodesBelow.filter(
-			(node) => node.ownedByPlayer,
-		);
-
-		console.log(
-			`[DEBUG TRADING] Found ${playerOwnedNodesBelow.length} player-owned nodes below for potential trading`,
-		);
-
-		// Debug links to verify connections
-		console.log(`[DEBUG LINKS] Testing pyramid links`);
-		const playerLinks = updatedPyramid.links.filter(
-			(link) => link.target === playerNode.id || link.source === playerNode.id,
-		);
-		console.log(
-			`[DEBUG LINKS] Player node ${playerNode.id} has ${playerLinks.length} links:`,
-			JSON.stringify(playerLinks),
-		);
-
-		// Try to trade with a chance determined by the constant (easier to adjust)
-		if (
-			playerOwnedNodesBelow.length > 0 &&
-			Math.random() < PLAYER_INVENTORY_TRADE_CHANCE
-		) {
-			console.log(
-				`[DEBUG TRADING] Trade attempt passed random check (${PLAYER_INVENTORY_TRADE_CHANCE * 100}% chance)`,
-			);
-			// Get products that the player has in inventory
-			const playerProducts = Object.entries(playerNode.inventory)
-				.filter(([_, qty]) => (qty || 0) > 0)
-				.map(([id]) => id);
-
-			console.log(
-				`[DEBUG TRADING] Player has ${playerProducts.length} product types in inventory for trading`,
-			);
-
-			if (playerProducts.length > 0) {
-				// Try to trade with each downstream node instead of just one random node
-				// This increases the chance of successful trades
-				let tradesMade = false;
-
-				// Sort nodes to prioritize ones with no inventory
-				const sortedNodes = [...playerOwnedNodesBelow].sort((a, b) => {
-					const aHasInventory =
-						a.inventory && Object.keys(a.inventory).length > 0;
-					const bHasInventory =
-						b.inventory && Object.keys(b.inventory).length > 0;
-					// Nodes without inventory come first
-					if (aHasInventory && !bHasInventory) return 1;
-					if (!aHasInventory && bHasInventory) return -1;
-					return 0;
-				});
-
-				console.log(
-					`[DEBUG TRADING] Prioritizing ${sortedNodes.length} nodes, favoring those without inventory`,
-				);
-
-				for (const targetNode of sortedNodes) {
-					// Skip if we've already done 3 trades
-					if (tradesMade) break;
-
-					// Pick a random product to trade
-					const randomProductId =
-						playerProducts[Math.floor(Math.random() * playerProducts.length)];
-					const product = state.products.find((p) => p.id === randomProductId);
-					const productQuantity = playerNode.inventory[randomProductId] || 0;
-
-					console.log(
-						`[DEBUG TRADING] Selected product ${product?.name} (ID: ${randomProductId}) for trading, quantity available: ${productQuantity}`,
-					);
-
-					if (product && productQuantity > 0) {
-						const targetNodeIndex = nodesAfterTrading.findIndex(
-							(n) => n.id === targetNode.id,
-						);
-
-						if (targetNodeIndex >= 0) {
-							// Calculate available space
-							const targetInventory =
-								nodesAfterTrading[targetNodeIndex].inventory || {};
-							const totalTargetInventory = Object.values(
-								targetInventory,
-							).reduce((sum, qty) => sum + qty, 0);
-							const availableSpace =
-								nodesAfterTrading[targetNodeIndex].maxInventory -
-								totalTargetInventory;
-
-							console.log(
-								`[DEBUG TRADING] Target node has ${availableSpace} available space out of ${nodesAfterTrading[targetNodeIndex].maxInventory} max inventory`,
-							);
-
-							if (availableSpace > 0) {
-								// Use a fixed trade quantity for reliability - at least 1 item
-								const tradeQuantity = Math.min(
-									2, // Always try to transfer 2 items
-									productQuantity,
-									availableSpace,
-								);
-
-								console.log(
-									`[DEBUG TRADING] Trade quantity determined: ${tradeQuantity}`,
-								);
-
-								if (tradeQuantity > 0) {
-									// Update player's inventory
-									const playerNodeIndex = nodesAfterTrading.findIndex(
-										(n) => n.id === playerNode.id,
-									);
-
-									if (playerNodeIndex >= 0) {
-										const updatedPlayerInventory = {
-											...nodesAfterTrading[playerNodeIndex].inventory,
-										};
-										updatedPlayerInventory[randomProductId] = Math.max(
-											0,
-											(updatedPlayerInventory[randomProductId] || 0) -
-												tradeQuantity,
-										);
-
-										// Update target node's inventory
-										const updatedTargetInventory = { ...targetInventory };
-										updatedTargetInventory[randomProductId] =
-											(updatedTargetInventory[randomProductId] || 0) +
-											tradeQuantity;
-
-										// Update player node
-										nodesAfterTrading[playerNodeIndex] = {
-											...nodesAfterTrading[playerNodeIndex],
-											inventory: updatedPlayerInventory,
-											lastUpdated: Date.now(),
-										};
-
-										// Update target node
-										nodesAfterTrading[targetNodeIndex] = {
-											...nodesAfterTrading[targetNodeIndex],
-											inventory: updatedTargetInventory,
-											lastUpdated: Date.now(),
-										};
-
-										tradesMade = true;
-										console.log(
-											`%c[PLAYER TRADE] You transferred ${tradeQuantity} ${product.name} to your downstream recruit at level ${nodesAfterTrading[targetNodeIndex].level}`,
-											"background: #4CAF50; color: white; padding: 3px 6px; border-radius: 3px; font-weight: bold;",
-										);
-									} else {
-										console.log(
-											`[DEBUG TRADING] Player node not found in nodesAfterTrading array`,
-										);
-									}
-								} else {
-									console.log(
-										`[DEBUG TRADING] Trade quantity was 0, no trade occurred`,
-									);
-								}
-							} else {
-								console.log(
-									`[DEBUG TRADING] Target node has no available space for new inventory`,
-								);
-							}
-						} else {
-							console.log(
-								`[DEBUG TRADING] Target node not found in pyramid nodes`,
-							);
-						}
-					} else {
-						console.log(
-							`[DEBUG TRADING] Product not found for ID: ${randomProductId} or quantity is 0`,
-						);
-					}
-				}
-			}
-		} else if (playerOwnedNodesBelow.length === 0) {
-			console.log(`[DEBUG TRADING] No downstream nodes available for trading`);
-		} else {
-			console.log(
-				`[DEBUG TRADING] Trading skipped due to missing requirements`,
-			);
-		}
-	} else {
-		console.log(`[DEBUG TRADING] Player node not found or has no inventory`);
-	}
+	// Update nodes and track the updated player inventory
+	nodesAfterTrading = tradingResult.updatedNodes;
+	const playerInventoryAfterTrading = tradingResult.updatedPlayerInventory;
+	const playerMoneyFromTrades = tradingResult.moneyFromTrades;
 
 	// After trading, process sales and commissions recursively
 	// This is the second phase where nodes try to sell products and pass commissions up
 	// We need to process from bottom to top to ensure commissions flow upward correctly
 
 	// Debug the state of all node inventories after trading for verification
-	console.log("[DEBUG NODE INVENTORIES AFTER TRADING]");
 	nodesAfterTrading.forEach((node) => {
 		if (node.ownedByPlayer) {
 			console.log(
@@ -1203,40 +1072,6 @@ const processDayCycle = (state: GameState): GameState => {
 			);
 		}
 	});
-
-	// IMPORTANT: Fix player inventory sync issues
-	// Check if player position node has lost its inventory but player stats still have it
-	const finalPlayerNodeBeforeFix = nodesAfterTrading.find(
-		(node) => node.isPlayerPosition,
-	);
-
-	if (
-		finalPlayerNodeBeforeFix &&
-		(!finalPlayerNodeBeforeFix.inventory ||
-			Object.keys(finalPlayerNodeBeforeFix.inventory).length === 0) &&
-		Object.keys(state.player.inventory).length > 0
-	) {
-		console.log(
-			"[FIXING PLAYER INVENTORY] Player node lost inventory but player stats have it",
-		);
-
-		// Find the index of the player node
-		const playerNodeIndex = nodesAfterTrading.findIndex(
-			(node) => node.isPlayerPosition,
-		);
-
-		if (playerNodeIndex >= 0) {
-			// Restore inventory from player stats
-			nodesAfterTrading[playerNodeIndex] = {
-				...nodesAfterTrading[playerNodeIndex],
-				inventory: { ...state.player.inventory },
-			};
-
-			console.log(
-				"[FIXED PLAYER INVENTORY] Restored inventory from player stats",
-			);
-		}
-	}
 
 	// Get all AI nodes sorted by level (bottom to top)
 	const sortedAINodes = nodesAfterTrading
@@ -1416,49 +1251,16 @@ const processDayCycle = (state: GameState): GameState => {
 		);
 	}
 
-	// Ensure player's inventory in player stats is in sync with the player's node inventory
-	const finalPlayerNode = updatedNodes.find((node) => node.isPlayerPosition);
+	// Log for debugging - we now maintain player inventory in player stats only
 	console.log(
-		`[FINAL PLAYER NODE] Found: ${!!finalPlayerNode}, ID: ${finalPlayerNode?.id}`,
+		"[PLAYER INVENTORY] After trading:",
+		JSON.stringify(playerInventoryAfterTrading),
 	);
 
-	// Log all player nodes for diagnostics
-	console.log("[FINAL NODES] All nodes with player position:");
-	updatedNodes.forEach((node) => {
-		if (node.isPlayerPosition) {
-			console.log(
-				`- Node ID: ${node.id}, Level: ${node.level}, Has inventory: ${!!node.inventory}`,
-			);
-		}
-	});
-
-	// Get inventory from the player node OR from the player's stats if the node inventory is empty
-	// This is critical to prevent inventory loss
-	const finalPlayerInventory =
-		finalPlayerNode?.inventory &&
-		Object.keys(finalPlayerNode.inventory).length > 0
-			? finalPlayerNode.inventory
-			: state.player.inventory;
-
+	// Update the player's money with commission
 	console.log(
-		"[PLAYER INVENTORY SYNC] Before sync:",
-		JSON.stringify(state.player.inventory),
-	);
-	console.log(
-		"[PLAYER INVENTORY SYNC] After sync:",
-		JSON.stringify(finalPlayerInventory),
-	);
-
-	// Never use an empty inventory object if player previously had items
-	const updatedPlayerInventory =
-		Object.keys(finalPlayerInventory).length > 0 ||
-		Object.keys(state.player.inventory).length === 0
-			? finalPlayerInventory
-			: state.player.inventory;
-
-	console.log(
-		"[PLAYER INVENTORY FINAL]:",
-		JSON.stringify(updatedPlayerInventory),
+		`%c[DAY SUMMARY] You earned $${playerCommissions.toFixed(2)} in commissions from your network's sales and $${playerMoneyFromTrades.toFixed(2)} from trading products to your downstream recruits.`,
+		"background: #3f51b5; color: white; padding: 3px 6px; border-radius: 3px; font-weight: bold;",
 	);
 
 	return {
@@ -1467,10 +1269,10 @@ const processDayCycle = (state: GameState): GameState => {
 		player: {
 			...state.player,
 			recruits: newRecruits,
-			// Use the updated inventory or keep the original if it would be emptied
-			inventory: updatedPlayerInventory,
-			// Add any commissions earned to player's money
-			money: state.player.money + playerCommissions,
+			// Use the inventory from trading operations
+			inventory: playerInventoryAfterTrading,
+			// Add any commissions earned to player's money, plus money from trades
+			money: state.player.money + playerCommissions + playerMoneyFromTrades,
 		},
 	};
 };
@@ -1845,14 +1647,10 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 	switch (action.type) {
 		case "ADVANCE_TIME": {
 			// Add console logging to help debug
-			console.log(
-				`[REDUCER] Processing ADVANCE_TIME action: ${action.hours} hours`,
-			);
+
 			// Call our existing advanceGameTime function to handle the time advancement
 			const newState = advanceGameTime(state, action.hours);
-			console.log(
-				`[REDUCER] Time advanced from ${state.gameDay}:${state.gameHour} to ${newState.gameDay}:${newState.gameHour}`,
-			);
+
 			return newState;
 		}
 
@@ -2339,7 +2137,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 				return state;
 			}
 
-			// Check if player has enough of this product
+			// Check if player has enough of this product in their inventory (player stats)
 			if ((state.player.inventory[productId] || 0) < quantity) {
 				console.log(`Not enough ${product.name} in inventory`);
 				return state;
@@ -2362,6 +2160,9 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 				return state;
 			}
 
+			// Calculate total price (using downsell price - selling to your own network)
+			const totalPrice = product.downsellPrice * quantity;
+
 			// Check if target node has enough room in inventory
 			const targetInventory = targetNode.inventory || {};
 			const currentQuantity = targetInventory[productId] || 0;
@@ -2380,10 +2181,7 @@ const gameReducer = (state: GameState, action: GameAction): GameState => {
 				return state;
 			}
 
-			// Calculate sale price (downsell price)
-			const totalPrice = product.downsellPrice * quantity;
-
-			// Update player inventory and money
+			// Update player's inventory (directly from player stats - single source of truth)
 			const updatedPlayerInventory = { ...state.player.inventory };
 			updatedPlayerInventory[productId] = Math.max(
 				0,
@@ -2599,4 +2397,186 @@ export const useGameState = () => {
 	]);
 
 	return { gameState, dispatch };
+};
+
+/**
+ * Process player inventory trading to downstream nodes in the pyramid.
+ * @param pyramid The current pyramid graph structure
+ * @param playerNode The node representing the player's current position
+ * @param nodesAfterTrading Current state of all nodes after previous trading operations
+ * @param state The current game state
+ * @returns An object containing updated nodes, player inventory, and money from trades
+ */
+const processPlayerInventoryTrading = (
+	pyramid: PyramidGraph,
+	playerNode: PyramidNode,
+	nodesAfterTrading: PyramidNode[],
+	state: GameState,
+): {
+	updatedNodes: PyramidNode[];
+	updatedPlayerInventory: { [productId: string]: number };
+	moneyFromTrades: number;
+} => {
+	// Deep clone the nodes array to avoid mutation issues
+	const updatedNodes = [...nodesAfterTrading];
+
+	// Use player stats inventory as the single source of truth
+	const playerInventory = { ...state.player.inventory };
+
+	// Track money earned from trades
+	let moneyFromTrades = 0;
+
+	console.log(
+		`[DEBUG TRADING] Player inventory:`,
+		Object.keys(playerInventory).length > 0
+			? JSON.stringify(playerInventory)
+			: "none",
+	);
+
+	if (!playerNode || Object.keys(playerInventory).length === 0) {
+		console.log(`[DEBUG TRADING] Player node not found or has no inventory`);
+		return {
+			updatedNodes,
+			updatedPlayerInventory: playerInventory,
+			moneyFromTrades,
+		};
+	}
+
+	// Find nodes directly below the player
+	const playerNodesBelow = getNodesBelow(pyramid, playerNode.id);
+	const playerOwnedNodesBelow = playerNodesBelow.filter(
+		(node) => node.ownedByPlayer,
+	);
+
+	console.log(
+		`[DEBUG TRADING] Found ${playerOwnedNodesBelow.length} player-owned nodes below for potential trading`,
+	);
+
+	// Debug links to verify connections
+	console.log(`[DEBUG LINKS] Testing pyramid links`);
+	const playerLinks = pyramid.links.filter(
+		(link) => link.target === playerNode.id || link.source === playerNode.id,
+	);
+	console.log(
+		`[DEBUG LINKS] Player node ${playerNode.id} has ${playerLinks.length} links:`,
+		JSON.stringify(playerLinks),
+	);
+
+	// Try to trade with a chance determined by the constant (easier to adjust)
+	if (playerOwnedNodesBelow.length === 0) {
+		console.log(`[DEBUG TRADING] No downstream nodes available for trading`);
+		return {
+			updatedNodes,
+			updatedPlayerInventory: playerInventory,
+			moneyFromTrades,
+		};
+	}
+
+	console.log(
+		`[DEBUG TRADING] Trade attempt passed random check (${PLAYER_INVENTORY_TRADE_CHANCE * 100}% chance)`,
+	);
+
+	// Get products that the player has in inventory
+	const playerProducts = Object.entries(playerInventory)
+		.filter(([_, qty]) => (qty || 0) > 0)
+		.map(([id]) => id);
+
+	console.log(
+		`[DEBUG TRADING] Player has ${playerProducts.length} product types in inventory for trading`,
+	);
+
+	if (playerProducts.length === 0) {
+		console.log(`[DEBUG TRADING] Player has no products to trade`);
+		return {
+			updatedNodes,
+			updatedPlayerInventory: playerInventory,
+			moneyFromTrades,
+		};
+	}
+
+	// Try to trade with each downstream node instead of just one random node
+	// This increases the chance of successful trades
+	let tradesMade = false;
+
+	// Prioritize nodes without inventory or with space for new inventory
+	playerOwnedNodesBelow.sort((a, b) => {
+		const aHasInventory = a.inventory && Object.keys(a.inventory).length > 0;
+		const bHasInventory = b.inventory && Object.keys(b.inventory).length > 0;
+		if (aHasInventory && !bHasInventory) return 1;
+		if (!aHasInventory && bHasInventory) return -1;
+		return 0;
+	});
+
+	// Try to trade with each downstream node
+	for (const targetNode of playerOwnedNodesBelow) {
+		const targetNodeIndex = updatedNodes.findIndex(
+			(n) => n.id === targetNode.id,
+		);
+		if (targetNodeIndex === -1) continue;
+
+		// Pick a random product to trade
+		const availableProducts = playerProducts.filter(
+			(productId) => (playerInventory[productId] || 0) > 0,
+		);
+		if (availableProducts.length === 0) break;
+
+		const randomProductId =
+			availableProducts[Math.floor(Math.random() * availableProducts.length)];
+		const product = state.products.find((p) => p.id === randomProductId);
+		if (!product) continue;
+
+		// Calculate how many we can trade (1-3 units, limited by player inventory)
+		const maxTradeQty = Math.min(3, playerInventory[randomProductId] || 0);
+		if (maxTradeQty <= 0) continue;
+
+		const tradeQty = Math.max(1, Math.floor(Math.random() * maxTradeQty));
+
+		// Calculate payment amount (node pays base cost per unit)
+		const paymentAmount = product.baseCost * tradeQty;
+
+		// Only trade if node has enough money
+		if ((updatedNodes[targetNodeIndex].money || 0) < paymentAmount) {
+			console.log(
+				`[DEBUG TRADING] Node ${targetNode.id} doesn't have enough money (${updatedNodes[targetNodeIndex].money || 0}) to pay for trade (${paymentAmount})`,
+			);
+			continue;
+		}
+
+		// Update player inventory
+		playerInventory[randomProductId] =
+			(playerInventory[randomProductId] || 0) - tradeQty;
+		if (playerInventory[randomProductId] <= 0) {
+			delete playerInventory[randomProductId];
+		}
+
+		// Update node inventory and money
+		updatedNodes[targetNodeIndex] = {
+			...updatedNodes[targetNodeIndex],
+			inventory: {
+				...(updatedNodes[targetNodeIndex].inventory || {}),
+				[randomProductId]:
+					(updatedNodes[targetNodeIndex].inventory?.[randomProductId] || 0) +
+					tradeQty,
+			},
+			money: (updatedNodes[targetNodeIndex].money || 0) - paymentAmount,
+		};
+
+		// Add payment to player's trade earnings
+		moneyFromTrades += paymentAmount;
+
+		console.log(
+			`%c[PLAYER TRADE] You sold ${tradeQty}x ${product.name} to your downstream recruit for $${paymentAmount} ($${product.baseCost}/each)`,
+			"background: #4CAF50; color: white; padding: 3px 6px; border-radius: 3px; font-weight: bold;",
+		);
+
+		console.log(
+			`[DEBUG TRADING] Traded ${tradeQty}x ${product.name} to node ${targetNode.id} for $${paymentAmount}`,
+		);
+	}
+
+	return {
+		updatedNodes,
+		updatedPlayerInventory: playerInventory,
+		moneyFromTrades,
+	};
 };
