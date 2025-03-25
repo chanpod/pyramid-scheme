@@ -56,25 +56,6 @@ const WORKSHOP_EXTRA_RECRUIT_CHANCE = 0.1; // 10% chance for extra recruit in wo
 const INVESTMENT_SUCCESS_MULTIPLIER = 0.0005; // 0.05% per dollar invested
 const INVESTMENT_ATTEMPTS_MULTIPLIER = 0.002; // 0.2% per dollar invested
 
-// Initial player stats
-const initialPlayerStats: PlayerStats = {
-	money: 1000,
-	recruits: 0,
-	level: 5, // Start at level 5 of the pyramid
-	currentNodeId: "",
-	charisma: 1,
-	recruitingPower: 1,
-	energy: MAX_ENERGY, // Start with full energy
-	reputation: 1,
-	isResting: false,
-	restUntil: 0,
-	recoveryPercentage: undefined,
-	inventory: {},
-	maxInventory: DEFAULT_MAX_INVENTORY,
-	totalSalesRandom: 0,
-	totalSalesDownstream: 0,
-};
-
 // Product definitions
 const productDefinitions = [
 	{
@@ -83,7 +64,7 @@ const productDefinitions = [
 		baseCost: 10,
 		basePrice: 25,
 		downsellPrice: 15,
-		baseChance: 0.25, // 25% base chance to sell to a random person (increased from 0.2)
+		baseChance: 0.15, // 25% base chance to sell to a random person (increased from 0.2)
 	},
 	{
 		id: "wellness-supplements",
@@ -91,7 +72,7 @@ const productDefinitions = [
 		baseCost: 20,
 		basePrice: 45,
 		downsellPrice: 30,
-		baseChance: 0.2, // 20% base chance to sell to a random person (increased from 0.15)
+		baseChance: 0.1, // 20% base chance to sell to a random person (increased from 0.15)
 	},
 	{
 		id: "lifestyle-kit",
@@ -99,7 +80,7 @@ const productDefinitions = [
 		baseCost: 50,
 		basePrice: 120,
 		downsellPrice: 80,
-		baseChance: 0.15, // 15% base chance to sell to a random person (increased from 0.1)
+		baseChance: 0.05, // 15% base chance to sell to a random person (increased from 0.1)
 	},
 ];
 
@@ -1395,10 +1376,7 @@ const processPlayerRandomSales = (state: GameState): GameState => {
 		if (productQuantity > 0) {
 			// Calculate sale chance based on charisma and product
 			const charismaBonus = state.player.charisma * CHARISMA_SALE_BONUS; // 5% per charisma point
-			const saleChance = Math.min(
-				0.95,
-				product.baseChance + NODE_RANDOM_SALE_CHANCE + charismaBonus,
-			);
+			const saleChance = Math.min(0.15, product.baseChance + charismaBonus);
 
 			// Determine how many sales attempts based on inventory and charisma
 			// More charisma = more sales attempts per day

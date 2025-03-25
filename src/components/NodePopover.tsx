@@ -437,16 +437,6 @@ const NodePopover: React.FC<NodePopoverProps> = ({
 					>
 						Inventory
 					</Tab>
-					{isPlayerDownstreamNode &&
-						playerStats &&
-						playerStats.currentNodeId && (
-							<Tab
-								active={activeTab === "sell"}
-								onClick={() => setActiveTab("sell")}
-							>
-								Sell/Restock
-							</Tab>
-						)}
 				</Tabs>
 			)}
 

@@ -1,35 +1,30 @@
-import { useCallback, useMemo, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
 	Background,
-	Controls,
-	Node,
-	Edge,
-	useReactFlow,
-	ReactFlowProvider,
-	NodeTypes,
-	EdgeTypes,
-	Panel,
 	ConnectionLineType,
+	Controls,
+	type Edge,
+	type EdgeTypes,
+	type Node,
+	type NodeTypes,
+	Panel,
+	ReactFlowProvider,
+	useReactFlow,
 } from "reactflow";
-import styled from "styled-components";
-import type {
-	PyramidGraph as PyramidGraphType,
-	PyramidNode,
-	PyramidLink,
-	Product,
-} from "../types";
 import "reactflow/dist/style.css";
-import { CustomNode } from "./nodes/CustomNode";
-import { CustomEdge } from "./edges/CustomEdge";
+import styled from "styled-components";
+import type { Product, PyramidGraph as PyramidGraphType } from "../types";
 import NodePopover from "./NodePopover";
+import { CustomEdge } from "./edges/CustomEdge";
+import { CustomNode } from "./nodes/CustomNode";
 
 interface PyramidFlowGraphProps {
 	pyramid: PyramidGraphType;
 	onNodeClick: (nodeId: string) => void;
 	selectedNodeId?: string;
 	canMoveUp?: boolean;
-	playerStats?: any;
-	dispatch?: any;
+	playerStats?: Record<string, any>;
+	dispatch?: (action: any) => void;
 	products?: Product[];
 }
 
@@ -292,20 +287,28 @@ const PyramidFlowInner = ({
 			// Position Y: top to bottom
 			const y = node.level * levelHeight;
 
+			// Update player node data with current player stats money
+			let nodeData = { ...node };
+
+			// If this is the player position node, use the money value from playerStats
+			if (nodeData.isPlayerPosition && playerStats) {
+				nodeData.money = playerStats.money;
+			}
+
 			// Create React Flow node
 			return {
 				id: node.id,
 				type: "pyramidNode",
 				position: { x, y },
 				data: {
-					...node,
+					...nodeData,
 					isSelected: node.id === selectedNodeId,
 					onClick: (event: React.MouseEvent) =>
 						handleNodeClick(node.id, { x, y }, event),
 				},
 			};
 		});
-	}, [pyramid.nodes, selectedNodeId, handleNodeClick]);
+	}, [pyramid.nodes, selectedNodeId, handleNodeClick, playerStats?.money]);
 
 	// Find the player node to center the view
 	const centerOnPlayer = useCallback(() => {
@@ -474,14 +477,17 @@ const PyramidFlowInner = ({
 								const color = networkColors[hashSum % networkColors.length];
 
 								return (
-									<div key={`network-${index}`} className="network-item">
+									<div
+										key={`network-${networkName || ""}-${hashSum}`}
+										className="network-item"
+									>
 										<div
 											className="color-swatch"
 											style={{ backgroundColor: color }}
 										/>
 										<div className="network-name">
 											{networkName?.length && networkName.length > 15
-												? networkName.substring(0, 15) + "..."
+												? `${networkName.substring(0, 15)}...`
 												: networkName}
 										</div>
 									</div>
