@@ -364,7 +364,7 @@ const createInitialGameState = (): GameState => {
 	// Select nodes for AI competitors (preferably on levels 3-6)
 	const possibleAINodes = pyramid.nodes.filter(
 		(node) =>
-			node.level >= 3 &&
+			node.level >= 2 && // Start from level 2, we'll handle root node separately
 			node.level <= 6 &&
 			!node.isPlayerPosition &&
 			!node.ownedByPlayer &&
@@ -376,7 +376,11 @@ const createInitialGameState = (): GameState => {
 	const shuffledAINodes = [...possibleAINodes].sort(() => Math.random() - 0.5);
 
 	// Place AI competitors
-	for (let i = 0; i < Math.min(numAICompetitors, shuffledAINodes.length); i++) {
+	for (
+		let i = 0;
+		i < Math.min(numAICompetitors - 1, shuffledAINodes.length);
+		i++
+	) {
 		// Get a random node for this AI competitor
 		const aiNode = shuffledAINodes[i];
 
@@ -409,7 +413,7 @@ const createInitialGameState = (): GameState => {
 					? product.basePrice > 30 // Aggressive AI prefers more expensive products
 					: product.baseChance > 0.15; // Steady AI prefers more reliable products
 
-			if (shouldStock || Math.random() < 0.4) {
+			if ((shouldStock || Math.random() < 0.4) && aiNode.inventory) {
 				// 40% chance to stock any product
 				const quantity = 1 + Math.floor(Math.random() * 3); // 1-3 of each product
 				aiNode.inventory[product.id] = quantity;
@@ -427,6 +431,64 @@ const createInitialGameState = (): GameState => {
 
 		// Propagate AI ownership down the hierarchy
 		pyramid = propagateOwnership(pyramid, aiNode.id, false, aiName, aiStrategy);
+	}
+
+	// Check if the root node has been assigned to an AI player
+	const rootNodes = pyramid.nodes.filter((node) => node.level === 1);
+	const rootNodeAssigned =
+		rootNodes.length > 0 && rootNodes.some((node) => node.aiControlled);
+
+	// If we have remaining AI players and the root node isn't assigned, use one for the root
+	if (
+		!rootNodeAssigned &&
+		rootNodes.length > 0 &&
+		aiCompetitors.length < numAICompetitors
+	) {
+		const rootNode = rootNodes[0]; // Get the first root node
+
+		// Generate a name for the root AI competitor
+		const rootAIName = generateAIName();
+		const rootAIStrategy = Math.random() < 0.5 ? "aggressive" : "steady";
+
+		// Mark the root node as AI-controlled
+		rootNode.aiControlled = true;
+		rootNode.name = rootAIName;
+		rootNode.aiStrategy = rootAIStrategy;
+		rootNode.maxInventory = DEFAULT_MAX_INVENTORY;
+
+		// Initialize AI inventory for root node
+		rootNode.inventory = rootNode.inventory || {};
+
+		// Higher money for the top level AI
+		rootNode.money = 1000 + Math.floor(Math.random() * 500);
+
+		// Give some starting inventory to the AI
+		productDefinitions.forEach((product) => {
+			const quantity = 2 + Math.floor(Math.random() * 5); // 2-6 of each product
+			if (rootNode.inventory) {
+				rootNode.inventory[product.id] = quantity;
+			}
+		});
+
+		aiCompetitors.push({
+			id: rootNode.id,
+			name: rootAIName,
+			strategy: rootAIStrategy,
+			level: rootNode.level,
+		});
+
+		console.log(
+			`Root AI competitor ${rootAIName} placed at level ${rootNode.level}`,
+		);
+
+		// Propagate AI ownership down the hierarchy
+		pyramid = propagateOwnership(
+			pyramid,
+			rootNode.id,
+			false,
+			rootAIName,
+			rootAIStrategy,
+		);
 	}
 
 	// Step 3: Assign any remaining unowned nodes randomly
@@ -1455,8 +1517,8 @@ const advanceGameTime = (state: GameState, hours: number): GameState => {
 	let newHour = state.gameHour + hours;
 
 	// Check for day rollover
-	while (newHour >= 24) {
-		newHour -= 24;
+	while (newHour >= HOURS_PER_DAY) {
+		newHour -= HOURS_PER_DAY;
 		newDay += 1;
 	}
 
