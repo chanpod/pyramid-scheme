@@ -1,50 +1,39 @@
 // Pyramid data structure and game logic
+import { PYRAMID, ECONOMY, COUP, INVESTMENT, BOT, BOT_PROFILES, LEVEL_PROFILE_WEIGHTS, POWER, canTierInvestInLevel, getRequiredTierName } from './config'
 
-// ============================================
-// GAME BALANCE CONFIGURATION
-// Adjust these values to tune the game economy
-// ============================================
+// Legacy CONFIG export for backwards compatibility
+// All values now come from src/config.js - edit there!
 export const CONFIG = {
-  // PYRAMID STRUCTURE
-  pyramidLevels: 5,              // Total levels (1+2+4+8+16 = 31 nodes)
-  playerStartLevelMin: 3,        // Player starts at this level or below (0 = top)
-
-  // INCOME & ECONOMY
-  recruitsPerClickBase: 1,       // Base recruits per click
-  moneyPerRecruit: 10,           // $ earned per recruit
-  downlineIncomePercent: 0.15,   // % of each downline member's income you get
-  uplineSkimPercent: 0.10,       // % of your income your upline takes
-
-  // COUP MECHANICS
-  coupBaseCostMultiplier: 0.5,   // Coup cost = defender power * this
-  coupPowerReduction: 0.1,       // Your power reduces coup cost by this %
-  coupMinCost: 50,               // Minimum coup cost
-  coupSuccessBase: 50,           // Base success chance (%)
-  coupPowerScaleFactor: 50,      // How much power difference affects success
-  coupMinChance: 10,             // Minimum success chance (%)
-  coupMaxChance: 95,             // Maximum success chance (%)
-  coupCooldownMs: 10000,         // Cooldown after failed coup (ms)
-
-  // INVESTMENTS
-  investmentROI: 1.5,            // Payout multiplier on successful coup (1.5 = 50% ROI)
-  investmentsLostOnFail: true,   // Do investors lose money if coup fails?
-  investorIncomeShare: 0.50,     // Investors collectively get up to 50% of investee's income
-  // Each investor's share is proportional to their investment amount
-
-  // BOT AI
-  botCoupChancePerTick: 0.10,    // Chance bot attempts coup each second
-  botMinCoupOdds: 30,            // Bot won't coup unless odds are at least this %
-  botCoupMoneyBuffer: 1.5,       // Bot needs cost * this much money to coup
-  botCoupExtraInvestPercent: 0.2,// Bot invests this % of money in coup attempt
-  botInvestChancePerTick: 0.05,  // Chance bot invests in a sibling each second
-  botInvestPercent: 0.1,         // Bot invests this % of money
-  botMinInvestAmount: 10,        // Minimum investment amount
-
-  // INITIAL BOT STATS (per level, level 0 = top)
-  botBaseMoney: 50,              // Base starting money
-  botMoneyPerLevel: 100,         // Additional money per level from top
-  botBaseIncome: 0,              // Base income/sec
-  botIncomePerLevel: 0.5,        // Additional income/sec per level from top
+  pyramidLevels: PYRAMID.levels,
+  playerStartLevelMin: PYRAMID.playerStartLevelMin,
+  moneyPerRecruit: ECONOMY.moneyPerRecruit,
+  downlineIncomePercent: ECONOMY.downlineIncomePercent,
+  uplineSkimPercent: ECONOMY.uplineSkimPercent,
+  coupBaseCostMultiplier: COUP.baseCostMultiplier,
+  coupPowerReduction: COUP.powerReduction,
+  coupMinCost: COUP.minCost,
+  coupSuccessBase: COUP.successBase,
+  coupPowerScaleFactor: COUP.powerScaleFactor,
+  coupMinChance: COUP.minChance,
+  coupMaxChance: COUP.maxChance,
+  coupCooldownMs: COUP.defenderCooldownMs,
+  attackerCooldownMs: COUP.attackerCooldownMs,
+  investmentROI: INVESTMENT.roi,
+  investmentsLostOnFail: INVESTMENT.lostOnFail,
+  investmentPowerMultiplier: INVESTMENT.powerMultiplier,
+  investmentCostMultiplier: INVESTMENT.costMultiplier,
+  botCoupChancePerTick: BOT.coupChancePerTick,
+  botMinCoupOdds: BOT.minCoupOdds,
+  botCoupMoneyBuffer: BOT.coupMoneyBuffer,
+  botCoupExtraInvestPercent: BOT.coupExtraInvestPercent,
+  botInvestChancePerTick: BOT.investChancePerTick,
+  botInvestPercent: BOT.investPercent,
+  botMinInvestAmount: BOT.minInvestAmount,
+  // Exponential scaling for bot starting stats
+  botBaseMoney: BOT.baseMoney,
+  botMoneyScaleBase: BOT.moneyScaleBase,
+  botBaseIncome: BOT.baseIncome,
+  botIncomeScaleBase: BOT.incomeScaleBase,
 }
 
 let nodeIdCounter = 0
@@ -53,8 +42,36 @@ function generateId() {
   return `node_${++nodeIdCounter}`
 }
 
+// Get level tier for profile weight selection
+function getLevelTier(level) {
+  if (level <= 2) return 'top'
+  if (level <= 5) return 'middle'
+  return 'bottom'
+}
+
+// Select a random profile based on level-weighted distribution
+export function selectProfile(level) {
+  const tier = getLevelTier(level)
+  const weights = LEVEL_PROFILE_WEIGHTS[tier]
+
+  // Calculate total weight
+  const totalWeight = Object.values(weights).reduce((sum, w) => sum + w, 0)
+
+  // Random selection
+  let random = Math.random() * totalWeight
+  for (const [profile, weight] of Object.entries(weights)) {
+    random -= weight
+    if (random <= 0) {
+      return profile
+    }
+  }
+
+  // Fallback to opportunist
+  return 'opportunist'
+}
+
 // Create a single node
-export function createNode(name, isPlayer = false) {
+export function createNode(name, isPlayer = false, profile = null) {
   return {
     id: generateId(),
     name,
@@ -68,15 +85,21 @@ export function createNode(name, isPlayer = false) {
     lastCoupAttempt: 0,
     // Track investments made in this node: { investorId: amount }
     investors: {},
+    // Bot AI profile (null for player)
+    profile: isPlayer ? null : profile,
   }
 }
 
-// Calculate a node's power
+// Calculate a node's power (used for buy-out costs and success chances)
+// Power = money + income (as X days worth) + investments received (weighted)
 export function calculatePower(node) {
-  return node.money + (node.incomePerSec * 100) + node.investmentsReceived
+  const incomePower = (node.incomePerSec || 0) * POWER.incomeMultiplier
+  const investmentPower = (node.investmentsReceived || 0) * POWER.investmentMultiplier
+  return node.money + incomePower + investmentPower
 }
 
-// Calculate coup success chance (10% - 95%)
+// Calculate coup success chance (5% - 90%)
+// Base 30% + power differential / 100
 export function calculateCoupChance(attacker, defender, investmentAmount = 0) {
   const attackerPower = calculatePower(attacker) + investmentAmount
   const defenderPower = calculatePower(defender)
@@ -107,11 +130,15 @@ export function generatePyramid(botNames) {
     const nodesInLevel = Math.pow(2, level)
     for (let i = 0; i < nodesInLevel; i++) {
       const name = botNames.shift() || `Bot ${Object.keys(nodes).length}`
-      const node = createNode(name, false)
+      // Assign profile based on level
+      const profile = selectProfile(level)
+      const node = createNode(name, false, profile)
 
-      // Higher level = more power (they got there first)
-      node.money += CONFIG.botBaseMoney + (levels - level) * CONFIG.botMoneyPerLevel
-      node.incomePerSec += CONFIG.botBaseIncome + (levels - level) * CONFIG.botIncomePerLevel
+      // EXPONENTIAL scaling - higher level (closer to top) = MUCH more power
+      // levelsFromBottom: 0 for bottom, 7 for top (in 8-level pyramid)
+      const levelsFromBottom = levels - 1 - level
+      node.money += Math.floor(CONFIG.botBaseMoney * Math.pow(CONFIG.botMoneyScaleBase, levelsFromBottom))
+      node.incomePerSec += CONFIG.botBaseIncome * Math.pow(CONFIG.botIncomeScaleBase, levelsFromBottom)
 
       nodes[node.id] = node
       allNodes.push({ node, level })
@@ -218,8 +245,18 @@ export function calculateUplineSkimming(nodes, nodeId) {
   return node.incomePerSec * CONFIG.uplineSkimPercent
 }
 
+// Calculate ownership percentage for an investment amount
+// Ownership = your investment / total investments in this node
+export function calculateOwnershipPercent(node, investmentAmount) {
+  const totalInvested = node.investmentsReceived || 0
+  if (totalInvested <= 0) return 0
+  return (investmentAmount / totalInvested) * 100
+}
+
 // Calculate income that goes to investors (they get a share of your earnings)
 // Returns an object mapping investorId -> amount they receive this tick
+// Ownership % = your investment / total investments in this node
+// Payout = ownership % * nodeIncome
 export function calculateInvestorPayouts(nodes, nodeId, nodeIncome) {
   const node = nodes[nodeId]
   if (!node.investors || Object.keys(node.investors).length === 0) {
@@ -229,20 +266,19 @@ export function calculateInvestorPayouts(nodes, nodeId, nodeIncome) {
   const totalInvested = node.investmentsReceived || 0
   if (totalInvested <= 0) return {}
 
-  // Investors collectively get up to X% of this node's income
-  const maxPayoutToInvestors = nodeIncome * CONFIG.investorIncomeShare
-
   const payouts = {}
   for (const [investorId, investmentAmount] of Object.entries(node.investors)) {
-    // Each investor gets proportional share based on their investment
-    const share = investmentAmount / totalInvested
-    payouts[investorId] = maxPayoutToInvestors * share
+    // Each investor's ownership % = their investment / total investments
+    // Their payout = ownership % * nodeIncome
+    const ownershipPercent = investmentAmount / totalInvested
+    payouts[investorId] = nodeIncome * ownershipPercent
   }
 
   return payouts
 }
 
 // Attempt a coup - returns payouts for investors if successful
+// On failure: lost money is distributed to attacker's downline (empowering them to overthrow the attacker!)
 export function attemptCoup(nodes, attackerId, defenderId, investmentAmount) {
   const attacker = nodes[attackerId]
   const defender = nodes[defenderId]
@@ -252,23 +288,33 @@ export function attemptCoup(nodes, attackerId, defenderId, investmentAmount) {
     return { success: false, reason: 'Can only coup your direct upline' }
   }
 
-  // Check cooldown
+  // Check attacker cooldown (can't spam coups)
   const now = Date.now()
   if (attacker.coupCooldown > now) {
     return { success: false, reason: 'Coup on cooldown' }
   }
 
+  // Check if defender is protected (recently failed coup against them)
+  if (defender.coupCooldown > now) {
+    return { success: false, reason: 'Target is protected' }
+  }
+
   const cost = calculateCoupCost(attacker, defender)
-  if (attacker.money < cost + investmentAmount) {
+  const totalCost = cost + investmentAmount
+  if (attacker.money < totalCost) {
     return { success: false, reason: 'Not enough money' }
   }
 
-  // Deduct cost
-  attacker.money -= (cost + investmentAmount)
-
-  // Calculate success
+  // Calculate success BEFORE deducting money (so chance matches what UI showed)
   const chance = calculateCoupChance(attacker, defender, investmentAmount)
   const roll = Math.random() * 100
+
+  // Deduct cost after calculating chance
+  attacker.money -= totalCost
+
+  // Attacker always gets a cooldown after attempting (prevents spam)
+  attacker.coupCooldown = now + CONFIG.attackerCooldownMs
+  attacker.lastCoupAttempt = now
 
   if (roll < chance) {
     // Success! Pay out investors with configured ROI
@@ -285,39 +331,57 @@ export function attemptCoup(nodes, attackerId, defenderId, investmentAmount) {
     attacker.investors = {}
     attacker.investmentsReceived = 0
 
-    // Swap positions
-    swapPositions(nodes, attackerId, defenderId)
+    // Swap positions - returns new rootId if root was replaced
+    const newRootId = swapPositions(nodes, attackerId, defenderId)
 
     return {
       success: true,
       chance: Math.floor(chance),
       roll: Math.floor(roll),
       investorPayouts,
+      newRootId,
     }
   } else {
-    // Failed - set cooldown, investments are lost
-    attacker.coupCooldown = now + CONFIG.coupCooldownMs
-    attacker.lastCoupAttempt = now
+    // Failed - defender gets protection, attacker's money goes to their downline!
+    defender.coupCooldown = now + CONFIG.coupCooldownMs
 
-    // Clear failed investments (they lose their money)
-    attacker.investors = {}
-    attacker.investmentsReceived = 0
+    // Distribute lost money to attacker's downline (this empowers them to overthrow the attacker!)
+    const downline = getDownline(nodes, attackerId)
+    const downlinePayouts = {}
+
+    if (downline.length > 0) {
+      const payoutPerNode = Math.floor(totalCost / downline.length)
+      if (payoutPerNode > 0) {
+        for (const nodeId of downline) {
+          if (nodes[nodeId]) {
+            nodes[nodeId].money += payoutPerNode
+            downlinePayouts[nodeId] = payoutPerNode
+          }
+        }
+      }
+    }
+
+    // Investments stay intact - investors don't lose money just because you failed
+    // (They only get paid out on success, so their investment remains at risk)
 
     return {
       success: false,
       reason: 'Coup failed',
       chance: Math.floor(chance),
       roll: Math.floor(roll),
+      downlinePayouts,
+      moneyLost: totalCost,
     }
   }
 }
 
 // Swap positions in the pyramid
+// Returns the new rootId if the root was replaced, otherwise null
 function swapPositions(nodes, attackerId, defenderId) {
   // Ensure we have fresh copies of all affected nodes to avoid mutation issues
   if (nodes[attackerId] === nodes[defenderId]) {
     console.error('Cannot swap node with itself')
-    return
+    return null
   }
 
   // Create fresh copies of the main nodes involved
@@ -331,6 +395,9 @@ function swapPositions(nodes, attackerId, defenderId) {
   const originalDefenderParentId = defender.parentId
   const originalDefenderChildIds = [...defender.childIds]
   const originalAttackerChildIds = [...attacker.childIds]
+
+  // Check if defender was the root (will need to update rootId)
+  const defenderWasRoot = originalDefenderParentId === null
 
   // Filter out attacker from defender's children (attacker was defender's child)
   const defenderOtherChildren = originalDefenderChildIds.filter(id => id !== attackerId)
@@ -370,6 +437,9 @@ function swapPositions(nodes, attackerId, defenderId) {
       id === defenderId ? attackerId : id
     )
   }
+
+  // Return new rootId if the root was replaced
+  return defenderWasRoot ? attackerId : null
 }
 
 // Check if investor is in target's upline (not allowed to invest)
@@ -392,19 +462,64 @@ export function isUplineOf(nodes, potentialUplineId, nodeId) {
   return false
 }
 
-// Check if investment is valid (only siblings or downline can invest, not upline)
-export function canInvestIn(nodes, investorId, targetId) {
+// Check if investment is valid
+// Rules: Can't invest in yourself, your direct parent, or your direct children
+// playerTierIndex: optional tier index for tier-gated investments (only for player)
+export function canInvestIn(nodes, investorId, targetId, playerTierIndex = null) {
+  const investor = nodes[investorId]
+  const target = nodes[targetId]
+
+  if (!investor || !target) {
+    return { allowed: false, reason: "Invalid nodes" }
+  }
+
   // Can't invest in yourself
   if (investorId === targetId) {
     return { allowed: false, reason: "Can't invest in yourself" }
   }
 
-  // Upline can't invest in you - they already "own" you in the pyramid
+  // Can't invest in your direct parent (immediate upline)
+  if (investor.parentId === targetId) {
+    return { allowed: false, reason: "Can't invest in your direct upline - they already benefit from you" }
+  }
+
+  // Can't invest in your direct children (immediate downline)
+  if (investor.childIds && investor.childIds.includes(targetId)) {
+    return { allowed: false, reason: "Can't invest in your direct downline - you already benefit from them" }
+  }
+
+  // Your upline can't invest in you (they already benefit from your position)
   if (isUplineOf(nodes, investorId, targetId)) {
-    return { allowed: false, reason: "Upline can't invest in you - they already benefit from your position" }
+    return { allowed: false, reason: "Your upline can't invest in you - they already benefit from your position" }
+  }
+
+  // Tier-gated investment check (only for player investments)
+  if (playerTierIndex !== null) {
+    const targetLevel = getNodeLevel(nodes, targetId)
+    if (!canTierInvestInLevel(playerTierIndex, targetLevel)) {
+      const requiredTier = getRequiredTierName(targetLevel)
+      return {
+        allowed: false,
+        reason: `Requires ${requiredTier} rank to invest in Level ${targetLevel} nodes`,
+        requiredTier,
+        targetLevel,
+      }
+    }
   }
 
   return { allowed: true }
+}
+
+// Calculate maximum investment allowed in a node (50% of their power)
+export function getMaxInvestment(nodes, investorId, targetId) {
+  const target = nodes[targetId]
+  if (!target) return 0
+
+  const targetPower = calculatePower(target)
+  const maxTotal = Math.floor(targetPower * 0.5) // 50% of power
+  const existingInvestment = target.investors?.[investorId] || 0
+
+  return Math.max(0, maxTotal - existingInvestment)
 }
 
 // Invest in a node - tracked for ROI payout
@@ -420,6 +535,12 @@ export function investInNode(nodes, investorId, targetId, amount) {
 
   if (investor.money < amount) {
     return { success: false, reason: 'Not enough money' }
+  }
+
+  // Check 50% cap
+  const maxAllowed = getMaxInvestment(nodes, investorId, targetId)
+  if (amount > maxAllowed) {
+    return { success: false, reason: `Max investment is $${Math.floor(maxAllowed)} (50% of their power)` }
   }
 
   investor.money -= amount
@@ -451,10 +572,107 @@ export function getNodeLevel(nodes, nodeId) {
   return level
 }
 
+// Select investment target based on profile preference
+function selectInvestmentTarget(nodes, botId, preference) {
+  const bot = nodes[botId]
+
+  switch (preference) {
+    case 'siblings':
+      // Schemer: Focus on siblings who might coup shared upline
+      return selectFromSiblings(nodes, botId)
+
+    case 'highPower':
+      // VC: Back the strongest potential winners
+      return selectHighPowerNode(nodes, botId)
+
+    case 'highIncome':
+      // Kingmaker: Target nodes with best $/sec for dividends
+      return selectHighIncomeNode(nodes, botId)
+
+    case 'threatened':
+      // Opportunist: Find nodes that are about to coup (high power vs parent)
+      return selectThreatenedNode(nodes, botId)
+
+    default:
+      // Random sibling (fallback behavior)
+      return selectFromSiblings(nodes, botId)
+  }
+}
+
+// Helper: Select random sibling
+function selectFromSiblings(nodes, botId) {
+  const siblings = getSiblings(nodes, botId)
+  if (siblings.length === 0) return null
+  return siblings[Math.floor(Math.random() * siblings.length)]
+}
+
+// Helper: Select highest power node we can invest in
+function selectHighPowerNode(nodes, botId) {
+  const candidates = getInvestmentCandidates(nodes, botId)
+  if (candidates.length === 0) return null
+
+  // Sort by power descending and pick from top candidates
+  candidates.sort((a, b) => calculatePower(nodes[b]) - calculatePower(nodes[a]))
+  // Pick from top 3 with some randomness
+  const topCount = Math.min(3, candidates.length)
+  return candidates[Math.floor(Math.random() * topCount)]
+}
+
+// Helper: Select highest income node for dividend farming
+function selectHighIncomeNode(nodes, botId) {
+  const candidates = getInvestmentCandidates(nodes, botId)
+  if (candidates.length === 0) return null
+
+  // Sort by income descending
+  candidates.sort((a, b) => nodes[b].incomePerSec - nodes[a].incomePerSec)
+  // Pick from top 3 with some randomness
+  const topCount = Math.min(3, candidates.length)
+  return candidates[Math.floor(Math.random() * topCount)]
+}
+
+// Helper: Select a node that looks ready to coup (high power relative to parent)
+function selectThreatenedNode(nodes, botId) {
+  const candidates = getInvestmentCandidates(nodes, botId)
+  if (candidates.length === 0) return null
+
+  // Find nodes with good coup odds against their parent
+  const threateningNodes = candidates.filter(id => {
+    const node = nodes[id]
+    if (!node.parentId) return false
+    const parent = nodes[node.parentId]
+    if (!parent) return false
+    const coupChance = calculateCoupChance(node, parent)
+    return coupChance >= 25 // At least 25% chance
+  })
+
+  if (threateningNodes.length > 0) {
+    return threateningNodes[Math.floor(Math.random() * threateningNodes.length)]
+  }
+
+  // Fallback to random sibling
+  return selectFromSiblings(nodes, botId)
+}
+
+// Helper: Get all valid investment candidates for a bot
+function getInvestmentCandidates(nodes, botId) {
+  const candidates = []
+  for (const nodeId of Object.keys(nodes)) {
+    if (nodeId === botId) continue
+    const result = canInvestIn(nodes, botId, nodeId)
+    if (result.allowed) {
+      candidates.push(nodeId)
+    }
+  }
+  return candidates
+}
+
 // Bot AI decision making - returns earnings breakdown
 export function botTick(nodes, botId) {
   const bot = nodes[botId]
   if (bot.isPlayer) return null
+
+  // Get bot's profile (fallback to opportunist for backwards compatibility)
+  const profile = BOT_PROFILES[bot.profile] || BOT_PROFILES.opportunist
 
   // Calculate bot earnings
   const downlineIncome = calculateDownlineIncome(nodes, botId)
@@ -464,30 +682,41 @@ export function botTick(nodes, botId) {
   // Bots earn money passively
   bot.money += Math.max(0, netIncome)
 
-  // Random chance to attempt coup
-  if (bot.parentId && Math.random() < CONFIG.botCoupChancePerTick) {
+  // COUP DECISION (profile-modified)
+  const coupChance = CONFIG.botCoupChancePerTick * profile.coupChanceMultiplier
+
+  if (bot.parentId && Math.random() < coupChance) {
     const parent = nodes[bot.parentId]
     const cost = calculateCoupCost(bot, parent)
     const chance = calculateCoupChance(bot, parent)
 
-    // Bot will attempt if they have money and decent odds
-    if (bot.money >= cost * CONFIG.botCoupMoneyBuffer && chance > CONFIG.botMinCoupOdds) {
+    // Profile affects money threshold and minimum odds
+    const moneyThreshold = cost * CONFIG.botCoupMoneyBuffer * profile.savingsMultiplier
+
+    if (bot.money >= moneyThreshold && chance >= profile.minCoupOdds) {
       const extraInvestment = Math.floor(bot.money * CONFIG.botCoupExtraInvestPercent)
       const result = attemptCoup(nodes, botId, bot.parentId, extraInvestment)
       return { botId, action: 'coup', target: bot.parentId, result }
     }
   }
 
-  // Small chance bots invest in others
-  if (Math.random() < CONFIG.botInvestChancePerTick && bot.money > CONFIG.botMinInvestAmount * 10) {
-    // Find someone who might coup soon (has decent power)
-    const siblings = getSiblings(nodes, botId)
-    if (siblings.length > 0) {
-      const targetId = siblings[Math.floor(Math.random() * siblings.length)]
-      const investAmount = Math.floor(bot.money * CONFIG.botInvestPercent)
+  // INVEST DECISION (profile-modified)
+  const investChance = CONFIG.botInvestChancePerTick * profile.investChanceMultiplier
+  const minInvestMoney = CONFIG.botMinInvestAmount * 10 * profile.savingsMultiplier
+
+  if (Math.random() < investChance && bot.money > minInvestMoney) {
+    // Use profile's target preference
+    const targetId = selectInvestmentTarget(nodes, botId, profile.targetPreference)
+
+    if (targetId) {
+      const investAmount = Math.floor(
+        bot.money * CONFIG.botInvestPercent * profile.investPercentMultiplier
+      )
       if (investAmount > CONFIG.botMinInvestAmount) {
-        investInNode(nodes, botId, targetId, investAmount)
-        return { botId, action: 'invest', target: targetId, amount: investAmount }
+        const result = investInNode(nodes, botId, targetId, investAmount)
+        if (result.success) {
+          return { botId, action: 'invest', target: targetId, amount: investAmount }
+        }
       }
     }
   }

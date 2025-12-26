@@ -2,71 +2,32 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import './App.css'
 import PyramidView from './components/PyramidView'
 import ActionModal from './components/ActionModal'
+import InvestorListModal from './components/InvestorListModal'
 import { generateBotNames } from './botNames'
 import {
   generatePyramid,
   calculateDownlineIncome,
   calculateInvestorPayouts,
+  calculatePower,
   attemptCoup,
   investInNode,
   botTick,
   getNodeLevel,
+  getDownline,
   canInvestIn,
 } from './pyramid'
+import {
+  DAY,
+  MARKETING,
+  TIERS,
+  QUOTES,
+  UPGRADES,
+  getUpgrade,
+  getUpgradesByCategory,
+  INVESTMENT_TIER_REQUIREMENTS,
+} from './config'
 
 const SAVE_KEY = 'pyramid-game-save'
-
-// Tier definitions with satirical names
-const TIERS = [
-  { name: 'Hopeful Newcomer', subtitle: '"Everyone starts somewhere!"', badge: 'bronze', threshold: 0 },
-  { name: 'Bronze Associate', subtitle: '"You\'re on your way!"', badge: 'bronze', threshold: 10 },
-  { name: 'Silver Partner', subtitle: '"The grind is real!"', badge: 'silver', threshold: 50 },
-  { name: 'Gold Executive', subtitle: '"Leadership material!"', badge: 'gold', threshold: 200 },
-  { name: 'Platinum Director', subtitle: '"Inspiring others daily!"', badge: 'platinum', threshold: 1000 },
-  { name: 'Diamond Elite', subtitle: '"Top 1% mindset!"', badge: 'diamond', threshold: 5000 },
-  { name: 'Double Diamond Supreme', subtitle: '"Blessed and highly favored!"', badge: 'diamond', threshold: 25000 },
-  { name: 'Triple Platinum Sapphire Overlord', subtitle: '"Beyond human limits!"', badge: 'platinum', threshold: 100000 },
-  { name: 'Galactic Ruby Omega Champion', subtitle: '"Basically a deity!"', badge: 'diamond', threshold: 1000000 },
-  { name: 'Transcendent Uranium Phoenix Master', subtitle: '"This isn\'t even possible!"', badge: 'diamond', threshold: 10000000 },
-]
-
-// Motivational quotes (satirical)
-const QUOTES = [
-  { text: "You're not buying products, you're investing in YOUR future!", author: "- Your Upline" },
-  { text: "If you're not recruiting in your sleep, you're sleeping on success!", author: "- Diamond Elite Conference 2023" },
-  { text: "The pyramid is just a triangle of OPPORTUNITY!", author: "- Definitely Not A Scam Inc." },
-  { text: "Your friends and family aren't 'victims', they're 'pre-partners'!", author: "- Corporate Training Manual" },
-  { text: "Financial freedom is just 47 levels away!", author: "- CEO's Yacht" },
-  { text: "Winners never quit, and quitters never reach Platinum!", author: "- Motivational Poster" },
-  { text: "Coups are just 'aggressive networking'!", author: "- Your Sibling in the Pyramid" },
-  { text: "Invest in others so they can invest in you... wait, that's a pyramid scheme.", author: "- Self-Aware Bot" },
-]
-
-// Tiered upgrade system - costs escalate to force engagement with investments/passive income
-const UPGRADE_TIERS = {
-  clickPower: {
-    name: 'Recruitment Skills',
-    icon: '💳',
-    levels: [
-      { cost: 1000, bonus: 1, desc: '+1 recruit/click', subtitle: 'Better Business Cards' },
-      { cost: 5000, bonus: 3, desc: '+3 recruits/click', subtitle: 'Coffee Meeting Mastery' },
-      { cost: 25000, bonus: 8, desc: '+8 recruits/click', subtitle: 'Networking Guru Status' },
-      { cost: 100000, bonus: 20, desc: '+20 recruits/click', subtitle: 'LinkedIn Influencer' },
-      { cost: 400000, bonus: 50, desc: '+50 recruits/click', subtitle: 'Pyramid Whisperer' },
-    ]
-  },
-  passiveIncome: {
-    name: 'Passive Income',
-    icon: '🖼️',
-    levels: [
-      { cost: 2000, bonus: 2, desc: '+$2/sec', subtitle: 'Motivational Poster' },
-      { cost: 8000, bonus: 5, desc: '+$5/sec', subtitle: 'Garage Full of Inventory' },
-      { cost: 30000, bonus: 15, desc: '+$15/sec', subtitle: 'Luxury Car Lease' },
-      { cost: 120000, bonus: 40, desc: '+$40/sec', subtitle: 'Annual Conference VIP' },
-      { cost: 500000, bonus: 100, desc: '+$100/sec', subtitle: 'Private Jet Membership' },
-    ]
-  }
-}
 
 function formatNumber(num) {
   if (num >= 1000000000) return (num / 1000000000).toFixed(1) + 'B'
@@ -99,20 +60,26 @@ function saveGameState(state) {
 
 function App() {
   const [totalRecruits, setTotalRecruits] = useState(0)
-  const [recruitsPerClick, setRecruitsPerClick] = useState(1)
-  const [basePassiveIncome, setBasePassiveIncome] = useState(0)
   const [quoteIndex, setQuoteIndex] = useState(0)
-  const [upgradeLevels, setUpgradeLevels] = useState({ clickPower: 0, passiveIncome: 0 })
+  const [purchasedUpgrades, setPurchasedUpgrades] = useState([]) // Array of upgrade IDs
+  const [recruitMultiplier, setRecruitMultiplier] = useState(1) // 1, 10, 100, or 'max'
+
+  // Day cycle state
+  const [dayCount, setDayCount] = useState(1)
+  const [dayProgress, setDayProgress] = useState(0) // 0-100% progress to next day
+  const [lastDayIncome, setLastDayIncome] = useState(0) // Income earned last day tick
 
   // Pyramid state
   const [pyramid, setPyramid] = useState(null)
   const [playerId, setPlayerId] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
+  const [investorModalNode, setInvestorModalNode] = useState(null)
   const [coupResult, setCoupResult] = useState(null)
   const [eventLog, setEventLog] = useState([])
 
   // Menu state
   const [showMenu, setShowMenu] = useState(false)
+  const [showRanksModal, setShowRanksModal] = useState(false)
   const [lastSaved, setLastSaved] = useState(null)
 
   // Game over state
@@ -125,14 +92,17 @@ function App() {
 
   // Start a new game function
   const startNewGame = useCallback(() => {
-    const botNames = generateBotNames(50)
+    const botNames = generateBotNames(300)
     const { nodes, rootId, playerId: pId } = generatePyramid(botNames)
+    // Give player starting budget
+    nodes[pId] = { ...nodes[pId], money: MARKETING.startingBudget }
     setPyramid({ nodes, rootId })
     setPlayerId(pId)
     setTotalRecruits(0)
-    setRecruitsPerClick(1)
-    setBasePassiveIncome(0)
-    setUpgradeLevels({ clickPower: 0, passiveIncome: 0 })
+    setPurchasedUpgrades([])
+    setDayCount(1)
+    setDayProgress(0)
+    setLastDayIncome(0)
     setEventLog([])
     setQuoteIndex(0)
     setCoupResult(null)
@@ -155,9 +125,20 @@ function App() {
       // Restore from save
       console.log('Loading saved game...')
       setTotalRecruits(savedState.totalRecruits || 0)
-      setRecruitsPerClick(savedState.recruitsPerClick || 1)
-      setBasePassiveIncome(savedState.basePassiveIncome || 0)
-      setUpgradeLevels(savedState.upgradeLevels || { clickPower: 0, passiveIncome: 0 })
+      // Migrate old upgrade system to new purchasedUpgrades array
+      if (savedState.purchasedUpgrades) {
+        setPurchasedUpgrades(savedState.purchasedUpgrades)
+      } else {
+        // Legacy migration: convert old upgradeLevels to new system
+        const legacyUpgrades = []
+        const oldLevels = savedState.upgradeLevels || {}
+        // If they had click upgrades, give them bulk_ads
+        if (oldLevels.clickPower >= 1) legacyUpgrades.push('bulk_ads')
+        // If they had efficiency upgrades, give them recruit_training
+        if (oldLevels.efficiency >= 1) legacyUpgrades.push('recruit_training')
+        setPurchasedUpgrades(legacyUpgrades)
+      }
+      setDayCount(savedState.dayCount || 1)
       setPyramid(savedState.pyramid)
       setPlayerId(savedState.playerId)
       setEventLog(savedState.eventLog || [])
@@ -165,8 +146,10 @@ function App() {
     } else {
       // Start new game
       console.log('Starting new game...')
-      const botNames = generateBotNames(50)
+      const botNames = generateBotNames(300)
       const { nodes, rootId, playerId: pId } = generatePyramid(botNames)
+      // Give player starting budget
+      nodes[pId] = { ...nodes[pId], money: MARKETING.startingBudget }
       setPyramid({ nodes, rootId })
       setPlayerId(pId)
     }
@@ -177,14 +160,13 @@ function App() {
   useEffect(() => {
     saveDataRef.current = {
       totalRecruits,
-      recruitsPerClick,
-      basePassiveIncome,
-      upgradeLevels,
+      purchasedUpgrades,
+      dayCount,
       pyramid,
       playerId,
       eventLog,
     }
-  }, [totalRecruits, recruitsPerClick, basePassiveIncome, upgradeLevels, pyramid, playerId, eventLog])
+  }, [totalRecruits, purchasedUpgrades, dayCount, pyramid, playerId, eventLog])
 
   // Auto-save every 30 seconds + save on page unload
   useEffect(() => {
@@ -228,9 +210,8 @@ function App() {
   const handleSave = () => {
     const state = {
       totalRecruits,
-      recruitsPerClick,
-      basePassiveIncome,
-      upgradeLevels,
+      purchasedUpgrades,
+      dayCount,
       pyramid,
       playerId,
       eventLog,
@@ -250,6 +231,61 @@ function App() {
 
   // Get player node and calculate income
   const playerNode = pyramid?.nodes?.[playerId]
+
+  // Calculate upgrade effects from purchased upgrades
+  const upgradeEffects = (() => {
+    const effects = {
+      recruitsPerClick: 1,        // Base: 1 recruit per click
+      adCostMultiplier: 1.0,      // Base: no discount
+      incomePerRecruit: 0,        // Bonus on top of DAY.baseIncomePerRecruit
+      downlineIncomeBonus: 0,     // Bonus on top of ECONOMY.downlineIncomePercent
+      uplineSkimReduction: 0,     // Reduction to upline skim
+      investmentPowerMultiplier: 1.0, // Multiplier for investment power boost
+      buyoutCostMultiplier: 1.0,  // Multiplier for buyout cost
+      maxSuccessChanceBonus: 0,   // Bonus to max success chance
+      dividendMultiplier: 1.0,    // Multiplier for dividend income
+      roiBonus: 0,                // Bonus ROI on buyout success
+    }
+
+    for (const upgradeId of purchasedUpgrades) {
+      const upgrade = getUpgrade(upgradeId)
+      if (!upgrade) continue
+
+      if (upgrade.effect.recruitsPerClick) {
+        effects.recruitsPerClick += upgrade.effect.recruitsPerClick
+      }
+      if (upgrade.effect.adCostMultiplier) {
+        effects.adCostMultiplier *= upgrade.effect.adCostMultiplier
+      }
+      if (upgrade.effect.incomePerRecruit) {
+        effects.incomePerRecruit += upgrade.effect.incomePerRecruit
+      }
+      if (upgrade.effect.downlineIncomeBonus) {
+        effects.downlineIncomeBonus += upgrade.effect.downlineIncomeBonus
+      }
+      if (upgrade.effect.uplineSkimReduction) {
+        effects.uplineSkimReduction += upgrade.effect.uplineSkimReduction
+      }
+      if (upgrade.effect.investmentPowerMultiplier) {
+        effects.investmentPowerMultiplier *= upgrade.effect.investmentPowerMultiplier
+      }
+      if (upgrade.effect.buyoutCostMultiplier) {
+        effects.buyoutCostMultiplier *= upgrade.effect.buyoutCostMultiplier
+      }
+      if (upgrade.effect.maxSuccessChanceBonus) {
+        effects.maxSuccessChanceBonus += upgrade.effect.maxSuccessChanceBonus
+      }
+      if (upgrade.effect.dividendMultiplier) {
+        effects.dividendMultiplier *= upgrade.effect.dividendMultiplier
+      }
+      if (upgrade.effect.roiBonus) {
+        effects.roiBonus += upgrade.effect.roiBonus
+      }
+    }
+
+    return effects
+  })()
+
   const downlineIncome = playerNode ? calculateDownlineIncome(pyramid.nodes, playerId) : 0
 
   // Calculate investment income (from nodes the player has invested in)
@@ -269,8 +305,63 @@ function App() {
     return total
   })()
 
-  const totalPassiveIncome = basePassiveIncome + downlineIncome + investmentIncome
+  // Calculate recruit income (base + upgrade bonus per recruit)
+  const incomePerRecruit = DAY.baseIncomePerRecruit + upgradeEffects.incomePerRecruit
+  const recruitIncome = totalRecruits * incomePerRecruit
+
+  // Total income per day = recruits income + downline + investments
+  const totalIncomePerDay = recruitIncome + downlineIncome + investmentIncome
   const money = playerNode?.money ?? 0
+
+  // Calculate downline size (number of people under you)
+  const downlineCount = playerNode ? getDownline(pyramid.nodes, playerId).length : 0
+
+  // Calculate player's active investments (where player has invested in others)
+  const playerInvestments = (() => {
+    if (!pyramid?.nodes || !playerId) return []
+    const investments = []
+    for (const nodeId of Object.keys(pyramid.nodes)) {
+      const node = pyramid.nodes[nodeId]
+      if (node.investors && node.investors[playerId]) {
+        investments.push({
+          nodeId,
+          nodeName: node.name,
+          amount: node.investors[playerId],
+          totalInvested: node.investmentsReceived,
+          nodePower: calculatePower(node),
+        })
+      }
+    }
+    return investments.sort((a, b) => b.amount - a.amount)
+  })()
+
+  // Calculate total invested amount
+  const totalInvested = playerInvestments.reduce((sum, i) => sum + i.amount, 0)
+
+  // Net worth = cash on hand + investments made
+  const netWorth = money + totalInvested
+
+  // Sync player's income to their pyramid node (for power calculation)
+  useEffect(() => {
+    if (!pyramid || !playerId) return
+    const currentIncome = pyramid.nodes[playerId]?.incomePerSec ?? 0
+    // Only update if income changed significantly (avoid floating point loops)
+    if (Math.abs(currentIncome - totalIncomePerDay) > 0.01) {
+      setPyramid(prev => {
+        if (!prev || !playerId) return prev
+        return {
+          ...prev,
+          nodes: {
+            ...prev.nodes,
+            [playerId]: {
+              ...prev.nodes[playerId],
+              incomePerSec: totalIncomePerDay,
+            }
+          }
+        }
+      })
+    }
+  }, [totalIncomePerDay, playerId, pyramid])
 
   // Sync player money changes back to pyramid
   const setMoney = useCallback((updater) => {
@@ -292,43 +383,59 @@ function App() {
     })
   }, [playerId])
 
-  // Use ref for basePassiveIncome to avoid re-running effect
-  const basePassiveIncomeRef = useRef(basePassiveIncome)
+  // Refs for game state that changes frequently
+  const totalRecruitsRef = useRef(totalRecruits)
+  const upgradeEffectsRef = useRef(upgradeEffects)
   useEffect(() => {
-    basePassiveIncomeRef.current = basePassiveIncome
-  }, [basePassiveIncome])
+    totalRecruitsRef.current = totalRecruits
+    upgradeEffectsRef.current = upgradeEffects
+  }, [totalRecruits, upgradeEffects])
 
   // Ref to collect events from game loop without causing re-renders
   const pendingEventsRef = useRef([])
 
-  // Game loop - passive income tick + bot AI
+  // Day progress timer (updates every 100ms for smooth progress bar)
   useEffect(() => {
     if (!playerId) return
 
+    const startTime = Date.now()
     const interval = setInterval(() => {
+      if (gameOverRef.current) return
+      const elapsed = (Date.now() - startTime) % DAY.durationMs
+      setDayProgress((elapsed / DAY.durationMs) * 100)
+    }, 100)
+
+    return () => clearInterval(interval)
+  }, [playerId, dayCount]) // Reset timer when day changes
+
+  // Day tick - income calculation + bot AI (every 15 seconds)
+  useEffect(() => {
+    if (!playerId) return
+
+    const dayInterval = setInterval(() => {
       // Check ref to prevent processing after game over
       if (gameOverRef.current) return
 
       let playerWasCouped = false
       let coupedByName = ''
+      let dayIncome = 0
 
       setPyramid(prev => {
         if (!prev || gameOverRef.current) return prev
 
         const newNodes = { ...prev.nodes }
-        const currentBaseIncome = basePassiveIncomeRef.current
+        let currentRootId = prev.rootId
+        const currentRecruits = totalRecruitsRef.current
+        const currentUpgradeEffects = upgradeEffectsRef.current
 
         // === PHASE 1: Calculate all incomes and investor payouts ===
-        // Track investment income to pay out
         const investmentPayouts = {} // investorId -> total amount to receive
 
-        // Process all nodes to calculate investor payouts
         for (const nodeId of Object.keys(newNodes)) {
           const node = newNodes[nodeId]
           const nodeIncome = node.incomePerSec + calculateDownlineIncome(newNodes, nodeId)
 
           if (nodeIncome > 0) {
-            // Calculate payouts to this node's investors
             const payouts = calculateInvestorPayouts(newNodes, nodeId, nodeIncome)
             for (const [investorId, amount] of Object.entries(payouts)) {
               investmentPayouts[investorId] = (investmentPayouts[investorId] || 0) + amount
@@ -336,24 +443,28 @@ function App() {
           }
         }
 
-        // === PHASE 2: Update player income ===
+        // === PHASE 2: Update player income (recruit-based) ===
         const player = newNodes[playerId]
         if (!player) return prev
 
+        const incomePerRecruit = DAY.baseIncomePerRecruit + currentUpgradeEffects.incomePerRecruit
+        const playerRecruitIncome = currentRecruits * incomePerRecruit
         const playerDownlineIncome = calculateDownlineIncome(newNodes, playerId)
         const playerInvestmentIncome = investmentPayouts[playerId] || 0
-        const totalPlayerIncome = currentBaseIncome + playerDownlineIncome + playerInvestmentIncome
+        const totalPlayerIncome = playerRecruitIncome + playerDownlineIncome + playerInvestmentIncome
+
+        dayIncome = totalPlayerIncome
 
         newNodes[playerId] = {
           ...player,
           money: player.money + totalPlayerIncome,
-          incomePerSec: totalPlayerIncome,
+          incomePerSec: totalPlayerIncome, // Store for display purposes
         }
 
-        // === PHASE 3: Bot AI tick (includes their income + investment payouts) ===
+        // === PHASE 3: Bot AI tick ===
         const botIds = Object.keys(newNodes).filter(id => !newNodes[id].isPlayer)
         for (const botId of botIds) {
-          if (gameOverRef.current) break // Stop if game ended
+          if (gameOverRef.current) break
 
           newNodes[botId] = { ...newNodes[botId] }
 
@@ -363,45 +474,52 @@ function App() {
             newNodes[botId].money += botInvestmentIncome
           }
 
-          // Check if this bot's upline is the player (they could coup the player!)
+          // Check if this bot's upline is the player
           const botParentIsPlayer = newNodes[botId].parentId === playerId
 
           const result = botTick(newNodes, botId)
 
           if (result?.action === 'coup' && result.result.success) {
-            // Check if the player was couped
             if (botParentIsPlayer && result.target === playerId) {
               playerWasCouped = true
               coupedByName = newNodes[botId].name
-              gameOverRef.current = true // Set immediately to prevent further processing
+              gameOverRef.current = true
+            }
+
+            if (result.result.newRootId) {
+              currentRootId = result.result.newRootId
             }
 
             pendingEventsRef.current.push({
               id: Date.now() + Math.random(),
-              text: `${newNodes[botId].name} overthrew ${newNodes[result.target].name}!`,
+              text: `${newNodes[botId].name} bought out ${newNodes[result.target].name}!`,
               type: result.target === playerId ? 'player-couped' : 'coup'
             })
           }
         }
 
-        return { ...prev, nodes: newNodes }
+        return { ...prev, nodes: newNodes, rootId: currentRootId }
       })
+
+      // Increment day counter
+      setDayCount(d => d + 1)
+      setLastDayIncome(dayIncome)
 
       // Check if player was couped - game over!
       if (playerWasCouped) {
         setGameOver(true)
-        setGameOverReason(`${coupedByName} overthrew you!`)
+        setGameOverReason(`${coupedByName} bought you out!`)
       }
 
-      // Process pending events after state update
+      // Process pending events
       if (pendingEventsRef.current.length > 0) {
         const events = pendingEventsRef.current
         pendingEventsRef.current = []
         setEventLog(log => [...events, ...log.slice(0, 9 - events.length)])
       }
-    }, 1000)
+    }, DAY.durationMs)
 
-    return () => clearInterval(interval)
+    return () => clearInterval(dayInterval)
   }, [playerId]) // Only depend on playerId
 
   // Calculate current tier based on pyramid level
@@ -422,9 +540,51 @@ function App() {
     return peopleNeeded
   }
 
+  // Calculate marketing cost (slight scaling based on total recruits)
+  const recruitsPerClick = upgradeEffects.recruitsPerClick
+  const baseCostPerBatch = MARKETING.baseCostPerRecruit * Math.pow(MARKETING.costScaling, totalRecruits) * upgradeEffects.adCostMultiplier * recruitsPerClick
+
+  // Calculate how many batches we can afford for MAX option
+  const maxAffordableBatches = (() => {
+    if (money < baseCostPerBatch) return 0
+    // Simple calculation - find how many batches we can buy
+    // Since cost scales slightly, we iterate to be accurate
+    let batches = 0
+    let totalCost = 0
+    let currentRecruits = totalRecruits
+    while (batches < 1000) { // Cap at 1000 to prevent infinite loop
+      const batchCost = MARKETING.baseCostPerRecruit * Math.pow(MARKETING.costScaling, currentRecruits) * upgradeEffects.adCostMultiplier * recruitsPerClick
+      if (totalCost + batchCost > money) break
+      totalCost += batchCost
+      currentRecruits += recruitsPerClick
+      batches++
+    }
+    return batches
+  })()
+
+  // Determine effective multiplier
+  const effectiveMultiplier = recruitMultiplier === 'max' ? maxAffordableBatches : Math.min(recruitMultiplier, maxAffordableBatches)
+
+  // Calculate total cost for the effective multiplier
+  const totalMarketingCost = (() => {
+    let cost = 0
+    let currentRecruits = totalRecruits
+    for (let i = 0; i < effectiveMultiplier; i++) {
+      cost += MARKETING.baseCostPerRecruit * Math.pow(MARKETING.costScaling, currentRecruits) * upgradeEffects.adCostMultiplier * recruitsPerClick
+      currentRecruits += recruitsPerClick
+    }
+    return cost
+  })()
+
+  const totalRecruitsGained = effectiveMultiplier * recruitsPerClick
+  const canAffordMarketing = effectiveMultiplier > 0
+
   const handleRecruit = () => {
-    setTotalRecruits(prev => prev + recruitsPerClick)
-    setMoney(prev => prev + recruitsPerClick * 10)
+    if (!canAffordMarketing) return
+
+    // Deduct marketing cost
+    setMoney(prev => prev - totalMarketingCost)
+    setTotalRecruits(prev => prev + totalRecruitsGained)
 
     if (Math.random() < 0.1) {
       setQuoteIndex(Math.floor(Math.random() * QUOTES.length))
@@ -451,13 +611,15 @@ function App() {
 
       if (result.success) {
         setEventLog(log => [
-          { id: Date.now(), text: `YOU overthrew ${prev.nodes[targetId].name}!`, type: 'player-coup' },
+          { id: Date.now(), text: `YOU bought out ${prev.nodes[targetId].name}!`, type: 'player-coup' },
           ...log.slice(0, 9)
         ])
         setQuoteIndex(Math.floor(Math.random() * QUOTES.length))
       }
 
-      return { ...prev, nodes: newNodes }
+      // Update rootId if root was replaced (player couped the root!)
+      const newRootId = result.newRootId || prev.rootId
+      return { ...prev, nodes: newNodes, rootId: newRootId }
     })
   }
 
@@ -478,8 +640,6 @@ function App() {
 
       return { ...prev, nodes: newNodes }
     })
-
-    setSelectedNode(null)
   }
 
   const currentQuote = QUOTES[quoteIndex]
@@ -498,48 +658,74 @@ function App() {
           <button className="menu-button" onClick={() => setShowMenu(true)}>Menu</button>
         </div>
         <div className="header-stats">
+          <div className="header-stat header-stat--day">
+            <div className="header-stat-label">Day {dayCount}</div>
+            <div className="day-progress-bar">
+              <div className="day-progress-fill" style={{ width: `${dayProgress}%` }} />
+            </div>
+          </div>
           <div className="header-stat">
             <div className="header-stat-label">Balance</div>
             <div className="header-stat-value">${formatNumber(money)}</div>
           </div>
           <div className="header-stat">
-            <div className="header-stat-label">Per Second</div>
-            <div className="header-stat-value">${formatNumber(totalPassiveIncome)}/s</div>
+            <div className="header-stat-label">Net Worth</div>
+            <div className="header-stat-value header-stat-value--networth">${formatNumber(netWorth)}</div>
           </div>
           <div className="header-stat">
-            <div className="header-stat-label">Pyramid Level</div>
-            <div className="header-stat-value">{pyramidLevel === 0 ? 'TOP!' : `Level ${pyramidLevel}`}</div>
+            <div className="header-stat-label">Per Day</div>
+            <div className="header-stat-value">${formatNumber(totalIncomePerDay)}</div>
+          </div>
+          <div className="header-stat">
+            <div className="header-stat-label">Recruits</div>
+            <div className="header-stat-value header-stat-value--recruits">{formatNumber(totalRecruits)}</div>
+          </div>
+          <div className="header-stat">
+            <div className="header-stat-label">Downline</div>
+            <div className="header-stat-value header-stat-value--downline">{downlineCount}</div>
+          </div>
+          <div className="header-stat">
+            <div className="header-stat-label">Invested</div>
+            <div className="header-stat-value header-stat-value--investment">${formatNumber(totalInvested)}</div>
+          </div>
+          <div className="header-stat">
+            <div className="header-stat-label">Inv. Income</div>
+            <div className="header-stat-value header-stat-value--investment">${formatNumber(investmentIncome)}/day</div>
+          </div>
+          <div className="header-stat">
+            <div className="header-stat-label">Level</div>
+            <div className="header-stat-value">{pyramidLevel === 0 ? 'TOP!' : pyramidLevel}</div>
           </div>
         </div>
       </header>
 
       {/* Left Sidebar - Tier & Stats */}
       <aside className="sidebar-left">
-        <div className="card">
-          <div className="card-title">Your Rank</div>
+        <div className="card clickable" onClick={() => setShowRanksModal(true)}>
+          <div className="card-title">Your Rank <span className="card-hint">(click for details)</span></div>
           <div className="tier-display">
             <span className={`tier-badge ${currentTier.badge}`}>RANK {currentTierIndex + 1}</span>
             <div className="tier-name">{currentTier.name}</div>
             <div className="tier-subtitle">{currentTier.subtitle}</div>
             {nextTier && (
-              <div className="tier-progress">
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${Math.min(progressPercent, 100)}%` }} />
-                </div>
-                <div className="progress-label">
-                  <span>{formatNumber(totalRecruits)}</span>
-                  <span>{formatNumber(nextTier.threshold)}</span>
-                </div>
+              <div className="tier-next">
+                <span className="next-label">Next:</span> {nextTier.name}
+                <div className="next-hint">Buy out your upline to rank up!</div>
+              </div>
+            )}
+            {!nextTier && (
+              <div className="tier-next tier-max">
+                You've reached the top rank!
               </div>
             )}
           </div>
         </div>
 
         <div className="card">
-          <div className="card-title">Statistics</div>
+          <div className="card-title">Recruits</div>
           <div className="stats-list">
             <div className="stat-row">
-              <span className="stat-label">Total Recruits</span>
+              <span className="stat-label">Your Recruits</span>
               <span className="stat-value recruits">{formatNumber(totalRecruits)}</span>
             </div>
             <div className="stat-row">
@@ -547,17 +733,51 @@ function App() {
               <span className="stat-value">{recruitsPerClick}</span>
             </div>
             <div className="stat-row">
-              <span className="stat-label">Base $/sec</span>
-              <span className="stat-value money">${basePassiveIncome.toFixed(1)}</span>
+              <span className="stat-label">Efficiency</span>
+              <span className="stat-value money">${incomePerRecruit.toFixed(2)}/each</span>
+            </div>
+            <div className="stat-row stat-row--highlight">
+              <span className="stat-label">Recruit Income</span>
+              <span className="stat-value money">${formatNumber(recruitIncome)}/day</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Pyramid Network</div>
+          <div className="stats-list">
+            <div className="stat-row">
+              <span className="stat-label">Downline Size</span>
+              <span className="stat-value">{downlineCount} people</span>
+            </div>
+            <div className="stat-row stat-row--highlight">
+              <span className="stat-label">Downline Income</span>
+              <span className="stat-value money">${formatNumber(downlineIncome)}/day</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Investment Summary</div>
+          <div className="stats-list">
+            <div className="stat-row">
+              <span className="stat-label">Total Invested</span>
+              <span className="stat-value">${formatNumber(totalInvested)}</span>
             </div>
             <div className="stat-row">
-              <span className="stat-label">Downline $/sec</span>
-              <span className="stat-value money">${downlineIncome.toFixed(1)}</span>
+              <span className="stat-label">Active Positions</span>
+              <span className="stat-value">{playerInvestments.length}</span>
             </div>
-            <div className="stat-row">
-              <span className="stat-label">Investment $/sec</span>
-              <span className="stat-value money">${investmentIncome.toFixed(1)}</span>
+            <div className="stat-row stat-row--highlight">
+              <span className="stat-label">Investment Income</span>
+              <span className="stat-value money">${formatNumber(investmentIncome)}/day</span>
             </div>
+            {totalInvested > 0 && investmentIncome > 0 && (
+              <div className="stat-row">
+                <span className="stat-label">Daily ROI</span>
+                <span className="stat-value">{((investmentIncome / totalInvested) * 100).toFixed(1)}%</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -575,22 +795,71 @@ function App() {
             )}
           </div>
         </div>
+
+        <div className="card">
+          <div className="card-title">My Investments</div>
+          <div className="investments-list">
+            {playerInvestments.length === 0 ? (
+              <div className="investments-list__empty">
+                No active investments. Click on pyramid nodes to invest!
+              </div>
+            ) : (
+              playerInvestments.map(inv => (
+                <div
+                  key={inv.nodeId}
+                  className="investment-item"
+                  onClick={() => {
+                    const node = pyramid?.nodes?.[inv.nodeId]
+                    if (node) setSelectedNode(node)
+                  }}
+                >
+                  <div className="investment-item__name">{inv.nodeName}</div>
+                  <div className="investment-item__details">
+                    <span className="investment-item__amount">${formatNumber(inv.amount)}</span>
+                    <span className="investment-item__power">Power: ${formatNumber(inv.nodePower)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+            {playerInvestments.length > 0 && (
+              <div className="investments-list__total">
+                Total Invested: ${formatNumber(playerInvestments.reduce((sum, i) => sum + i.amount, 0))}
+              </div>
+            )}
+          </div>
+        </div>
       </aside>
 
       {/* Main Area - Pyramid View */}
       <main className="main-area main-area--pyramid">
         <div className="recruit-section recruit-section--compact">
-          <button className="recruit-button recruit-button--small" onClick={handleRecruit}>
-            <span className="recruit-icon">👥</span>
-            <span className="recruit-label">RECRUIT</span>
-            <span className="recruit-value">+{recruitsPerClick}</span>
+          <div className="recruit-multiplier">
+            {[1, 10, 100, 'max'].map(mult => (
+              <button
+                key={mult}
+                className={`multiplier-btn ${recruitMultiplier === mult ? 'active' : ''}`}
+                onClick={() => setRecruitMultiplier(mult)}
+              >
+                {mult === 'max' ? 'MAX' : `${mult}x`}
+              </button>
+            ))}
+          </div>
+          <button
+            className={`recruit-button recruit-button--small ${!canAffordMarketing ? 'recruit-button--disabled' : ''}`}
+            onClick={handleRecruit}
+            disabled={!canAffordMarketing}
+          >
+            <span className="recruit-icon">📢</span>
+            <span className="recruit-label">RUN ADS</span>
+            <span className="recruit-value">+{formatNumber(totalRecruitsGained)} recruit{totalRecruitsGained !== 1 ? 's' : ''}</span>
+            <span className="recruit-cost">${formatNumber(totalMarketingCost)}</span>
           </button>
         </div>
 
         <div className="pyramid-container">
           <div className="pyramid-header">
             <h2>The Pyramid</h2>
-            <p>Click on your upline to attempt a coup, or invest in others</p>
+            <p>Click on your upline to buy them out, or invest in others</p>
           </div>
           {pyramid && (
             <PyramidView
@@ -599,6 +868,10 @@ function App() {
               playerId={playerId}
               selectedNodeId={selectedNode?.id}
               onNodeClick={handleNodeClick}
+              onInvestorBadgeClick={(node) => setInvestorModalNode(node)}
+              onQuickInvest={handleInvest}
+              playerTierIndex={currentTierIndex}
+              playerMoney={money}
             />
           )}
         </div>
@@ -627,42 +900,36 @@ function App() {
         <div className="card">
           <div className="card-title">Upgrades</div>
           <div className="upgrades-list">
-            {Object.entries(UPGRADE_TIERS).map(([key, tier]) => {
-              const currentLevel = upgradeLevels[key] || 0
-              const nextUpgrade = tier.levels[currentLevel]
-              const isMaxed = currentLevel >= tier.levels.length
-              const canAfford = nextUpgrade && money >= nextUpgrade.cost
+            {UPGRADES.map(upgrade => {
+              const isPurchased = purchasedUpgrades.includes(upgrade.id)
+              const canAfford = money >= upgrade.cost
 
               return (
                 <div
-                  key={key}
-                  className={`upgrade-item ${isMaxed ? 'maxed' : !canAfford ? 'locked' : ''}`}
+                  key={upgrade.id}
+                  className={`upgrade-item ${isPurchased ? 'purchased' : !canAfford ? 'locked' : ''}`}
                   onClick={() => {
-                    if (canAfford && nextUpgrade) {
-                      setMoney(prev => prev - nextUpgrade.cost)
-                      setUpgradeLevels(prev => ({ ...prev, [key]: prev[key] + 1 }))
-                      if (key === 'clickPower') {
-                        setRecruitsPerClick(prev => prev + nextUpgrade.bonus)
-                      } else if (key === 'passiveIncome') {
-                        setBasePassiveIncome(prev => prev + nextUpgrade.bonus)
-                      }
+                    if (!isPurchased && canAfford) {
+                      setMoney(prev => prev - upgrade.cost)
+                      setPurchasedUpgrades(prev => [...prev, upgrade.id])
                     }
                   }}
                 >
-                  <div className="upgrade-icon">{tier.icon}</div>
+                  <div className="upgrade-icon">{upgrade.icon}</div>
                   <div className="upgrade-info">
                     <div className="upgrade-name">
-                      {tier.name} {currentLevel > 0 && <span className="upgrade-level">Lvl {currentLevel}</span>}
+                      {upgrade.name}
+                      {isPurchased && <span className="upgrade-owned">OWNED</span>}
                     </div>
                     <div className="upgrade-desc">
-                      {isMaxed ? 'MAXED OUT!' : nextUpgrade.subtitle}
+                      {upgrade.subtitle}
                     </div>
                     <div className="upgrade-effect">
-                      {isMaxed ? 'No more upgrades available' : nextUpgrade.desc}
+                      {upgrade.desc}
                     </div>
                   </div>
                   <div className="upgrade-cost">
-                    {isMaxed ? '---' : `$${formatNumber(nextUpgrade.cost)}`}
+                    {isPurchased ? '✓' : `$${formatNumber(upgrade.cost)}`}
                   </div>
                 </div>
               )
@@ -684,16 +951,26 @@ function App() {
             setSelectedNode(null)
             setCoupResult(null)
           }}
+          playerTierIndex={currentTierIndex}
         />
       )}
 
-      {/* Coup Result Toast */}
+      {/* Investor List Modal */}
+      {investorModalNode && pyramid && (
+        <InvestorListModal
+          node={investorModalNode}
+          nodes={pyramid.nodes}
+          onClose={() => setInvestorModalNode(null)}
+        />
+      )}
+
+      {/* Buy Out Result Toast */}
       {coupResult && (
         <div className={`coup-toast coup-toast--${coupResult.success ? 'success' : 'fail'}`}>
           {coupResult.success ? (
-            <>Coup successful! You moved up the pyramid!</>
+            <>Buy out successful! You moved up the pyramid!</>
           ) : (
-            <>Coup failed ({coupResult.chance}% chance, rolled {coupResult.roll}). Try again soon.</>
+            <>Buy out failed ({coupResult.chance}% chance, rolled {coupResult.roll}). Try again soon.</>
           )}
           <button onClick={() => setCoupResult(null)}>×</button>
         </div>
@@ -728,6 +1005,58 @@ function App() {
 
             <button className="menu-btn menu-btn--close" onClick={() => setShowMenu(false)}>
               Close Menu
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Ranks Modal */}
+      {showRanksModal && (
+        <div className="menu-overlay" onClick={() => setShowRanksModal(false)}>
+          <div className="menu-modal ranks-modal" onClick={e => e.stopPropagation()}>
+            <h2>Rank Progression</h2>
+            <p className="ranks-intro">Climb the pyramid to unlock investment access to higher tiers!</p>
+
+            <div className="ranks-list">
+              {TIERS.map((tier, index) => {
+                const isCurrentTier = index === currentTierIndex
+                const isUnlocked = index <= currentTierIndex
+                // Find which pyramid level this tier unlocks investment for
+                const unlocksLevel = Object.entries(INVESTMENT_TIER_REQUIREMENTS)
+                  .find(([, reqTier]) => reqTier === index)?.[0]
+
+                return (
+                  <div
+                    key={index}
+                    className={`rank-item ${isCurrentTier ? 'current' : ''} ${isUnlocked ? 'unlocked' : 'locked'}`}
+                  >
+                    <div className="rank-number">#{index + 1}</div>
+                    <div className="rank-info">
+                      <div className="rank-name">
+                        <span className={`tier-badge ${tier.badge}`}>{tier.name}</span>
+                        {isCurrentTier && <span className="current-badge">YOU</span>}
+                      </div>
+                      <div className="rank-subtitle">{tier.subtitle}</div>
+                      {unlocksLevel !== undefined && (
+                        <div className="rank-unlock">
+                          Unlocks investing in Level {unlocksLevel} nodes
+                        </div>
+                      )}
+                    </div>
+                    <div className="rank-status">
+                      {isUnlocked ? '✓' : '🔒'}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="ranks-tip">
+              <strong>How to rank up:</strong> Buy out your direct upline to climb the pyramid!
+            </div>
+
+            <button className="menu-btn menu-btn--close" onClick={() => setShowRanksModal(false)}>
+              Close
             </button>
           </div>
         </div>

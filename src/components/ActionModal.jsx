@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { calculatePower, calculateCoupCost, calculateCoupChance, canInvestIn } from '../pyramid'
+import { calculatePower, calculateCoupCost, calculateCoupChance, canInvestIn, getMaxInvestment } from '../pyramid'
 
 function formatNumber(num) {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
@@ -15,6 +15,7 @@ export default function ActionModal({
   onCoup,
   onInvest,
   onClose,
+  playerTierIndex = 0,
 }) {
   const [investAmount, setInvestAmount] = useState(0)
   const [coupBonus, setCoupBonus] = useState(0)
@@ -24,8 +25,8 @@ export default function ActionModal({
   const targetPower = calculatePower(targetNode)
   const playerPower = calculatePower(playerNode)
 
-  // Check if player can invest in this target
-  const investCheck = nodes ? canInvestIn(nodes, playerNode.id, targetNode.id) : { allowed: true }
+  // Check if player can invest in this target (including tier requirements)
+  const investCheck = nodes ? canInvestIn(nodes, playerNode.id, targetNode.id, playerTierIndex) : { allowed: true }
   const canInvestInTarget = investCheck.allowed
 
   const baseCoupCost = canCoup ? calculateCoupCost(playerNode, targetNode) : 0
@@ -66,10 +67,10 @@ export default function ActionModal({
 
         {canCoup && (
           <div className="action-modal__section">
-            <h4>Coup Attempt</h4>
+            <h4>Buy Out</h4>
             {isOnCooldown ? (
               <div className="action-modal__cooldown">
-                Target is protected (cooldown active)
+                Target is protected (recently bought out)
               </div>
             ) : (
               <>
@@ -112,7 +113,7 @@ export default function ActionModal({
                   disabled={!canAffordCoup}
                   onClick={() => onCoup(targetNode.id, coupBonus)}
                 >
-                  {canAffordCoup ? `Attempt Coup (${Math.floor(boostedChance || baseSuccessChance)}%)` : 'Not Enough Money'}
+                  {canAffordCoup ? `Buy Out (${Math.floor(boostedChance || baseSuccessChance)}%)` : 'Not Enough Money'}
                 </button>
               </>
             )}
@@ -123,43 +124,51 @@ export default function ActionModal({
           <h4>Invest in {targetNode.name}</h4>
           {canInvestInTarget ? (
             <>
-              <p className="action-modal__invest-desc">
-                Boost their power & earn 50% of their income. If they coup, you get 50% ROI.
-              </p>
+              {(() => {
+                const playerInvestment = targetNode.investors?.[playerNode.id] || 0
+                const totalInvested = targetNode.investmentsReceived || 0
+                const ownershipPercent = totalInvested > 0 ? (playerInvestment / totalInvested) * 100 : 0
+                const maxInvestment = nodes ? getMaxInvestment(nodes, playerNode.id, targetNode.id) : playerNode.money
+                const effectiveMax = Math.min(maxInvestment, playerNode.money)
 
-              <div className="action-modal__quick-invest">
-                {[100, 1000, 10000, 100000].map(amount => (
-                  <button
-                    key={amount}
-                    className="action-btn action-btn--quick-invest"
-                    disabled={playerNode.money < amount}
-                    onClick={() => onInvest(targetNode.id, amount)}
-                  >
-                    ${formatNumber(amount)}
-                  </button>
-                ))}
-              </div>
+                return (
+                  <>
+                    {playerInvestment > 0 && (
+                      <div className="action-modal__ownership">
+                        <span className="label">Your Investment:</span>
+                        <span className="value">${formatNumber(playerInvestment)}</span>
+                        <span className="percent">({ownershipPercent.toFixed(1)}% ownership)</span>
+                      </div>
+                    )}
+                    <div className="action-modal__max-invest">
+                      <span className="label">Max Investment:</span>
+                      <span className="value">${formatNumber(maxInvestment)}</span>
+                      <span className="note">(50% of their power)</span>
+                    </div>
+                    <p className="action-modal__invest-desc">
+                      Earn your % of their income. If they buy out their upline, you get 50% ROI!
+                    </p>
 
-              <div className="action-modal__invest-input">
-                <label htmlFor="invest-amount">Custom Amount:</label>
-                <input
-                  id="invest-amount"
-                  type="number"
-                  min="0"
-                  max={playerNode.money}
-                  value={investAmount}
-                  onChange={e => setInvestAmount(Math.max(0, Number(e.target.value)))}
-                  onClick={e => e.stopPropagation()}
-                  onMouseDown={e => e.stopPropagation()}
-                />
-                <button
-                  className="action-btn action-btn--invest"
-                  disabled={investAmount <= 0 || investAmount > playerNode.money}
-                  onClick={() => onInvest(targetNode.id, investAmount)}
-                >
-                  Invest ${formatNumber(investAmount)}
-                </button>
-              </div>
+                    <div className="action-modal__quick-invest">
+                      {[5, 10, 25, 50].map(percent => {
+                        const cost = Math.floor(targetPower * (percent / 100))
+                        const canAfford = playerNode.money >= cost && cost <= maxInvestment
+                        return (
+                          <button
+                            key={percent}
+                            className="action-btn action-btn--quick-invest"
+                            disabled={!canAfford || cost <= 0}
+                            onClick={() => onInvest(targetNode.id, cost)}
+                            title={`$${formatNumber(cost)}`}
+                          >
+                            {percent}% (${formatNumber(cost)})
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </>
+                )
+              })()}
             </>
           ) : (
             <p className="action-modal__invest-blocked">

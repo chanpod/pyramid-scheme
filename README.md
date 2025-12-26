@@ -1,14 +1,14 @@
 # The Pyramid
 
-A satirical idle/clicker game that exposes the mathematical impossibility of pyramid schemes while being genuinely fun to play.
+A satirical idle/strategy game that exposes the mathematical impossibility of pyramid schemes while being genuinely fun to play.
 
 ## Concept
 
-**The Pyramid** is a Cookie Clicker-style game where players "recruit" people into a pyramid scheme. The twist: the game includes a "Reality Check" counter showing how quickly the required number of recruits exceeds Earth's population - making the inherent unsustainability of these schemes viscerally obvious.
+**The Pyramid** is a strategic game where players climb a pyramid scheme through marketing, investments, and buy-outs. The twist: a "Reality Check" counter shows how quickly the required recruits exceeds Earth's population - making the inherent unsustainability viscerally obvious.
 
 ### Core Theme
-- **Game first, education second** - It should be genuinely fun
-- **Corporate satire** - Mocking the absurd tier names, motivational culture, and hollow promises
+- **Game first, education second** - Genuinely fun gameplay
+- **Corporate satire** - Mocking absurd tier names, motivational culture, and hollow promises
 - **Mathematical reality** - Showing through gameplay how pyramid math is impossible
 
 ## Tech Stack
@@ -26,149 +26,189 @@ npm run dev
 
 ## How to Play
 
-### The Pyramid View
+### The Day Cycle
 
-You start near the bottom of a visual pyramid with ~31 positions. Your goal is to climb to the top by:
-1. **Clicking to recruit** - Generate money through direct recruitment
-2. **Building passive income** - Upgrade your income-per-second
-3. **Executing coups** - Overtake the person directly above you
-4. **Strategic investing** - Fund others' coups for ROI
-
-### Your Position
-
-- **You** are highlighted in the pyramid (green glow)
-- **Your upline** (direct boss) is shown in red - this is who you can coup
-- **Your siblings** (same level, same upline) are shown in blue
-- **Your downline** (everyone below you) is shown in cyan
+The game operates on a **day-based economy** (1 day = 15 seconds):
+- Income is calculated once per day
+- Decisions are strategic, not spam-based
+- Plan your moves between day ticks
 
 ### Making Money
 
-1. **Click the Recruit button** - Direct income from new recruits
-2. **Passive Income** - $/sec from upgrades
-3. **Downline Income** - You earn 15% of each downline member's income
-4. **Investment ROI** - 50% return when someone you invested in successfully coups
+1. **Run Ads** - Spend money to recruit people (costs $5+ per recruit)
+2. **Recruit Income** - Each recruit generates $0.50+ per day based on efficiency upgrades
+3. **Downline Income** - Earn 30% of each person below you in the pyramid
+4. **Investment Dividends** - Earn your ownership % of invested nodes' income per day
 
-### The MLM Reality
+### Starting Budget
 
-Your upline takes 10% of your base income. This is the pyramid scheme reality - money flows up.
+You begin with **$500** and must decide how to spend it:
+- Run ads to get recruits (your income source)
+- Buy efficiency upgrades (make recruits worth more)
+- Invest in others (earn dividends + ROI on successful buy-outs)
+- Save for a buy-out attempt
 
 ---
 
-## Coup Mechanics
+## The Pyramid View
 
-A **coup** is how you climb the pyramid by overtaking your direct upline.
+You start near the bottom of a visual pyramid with 255 positions (8 levels). Your goal is to climb to the top by:
 
-### How Coups Work
+1. **Marketing** - Spend money to recruit, generating income
+2. **Upgrading efficiency** - Make each recruit more valuable
+3. **Buying out your upline** - Take their position and their downline
+4. **Strategic investing** - Fund others for dividends and ROI
 
-1. **Click your upline** (red-highlighted node above you)
-2. **Pay the base cost** - Calculated from power difference
+### Visual Indicators
+
+- **You** - Green glow
+- **Your upline** - Red highlight (who you can buy out)
+- **Your siblings** - Blue (same level, same upline)
+- **Your downline** - Cyan (everyone below you)
+- **Green badge** - Total investments received (click to see investors)
+- **Blue badge** - Number of investors
+- **Red pulsing glow** - Threatened nodes (subordinate has 25%+ buy-out chance)
+
+---
+
+## Buy-Out Mechanics
+
+A **buy-out** is how you climb the pyramid by taking over your direct upline's position.
+
+### How Buy-Outs Work
+
+1. **Click your upline** (red-highlighted node)
+2. **Pay the base cost** - Based on power difference
 3. **Optional: Add extra investment** - Increases success chance
 4. **Roll for success** - Algorithmic chance based on power comparison
 
 ### Power Calculation
 
 ```
-Power = money + (incomePerSec × 100) + investmentsReceived
+Power = Money + (Investments Received × 1.5)
 ```
+
+Having investors backing you makes you stronger!
 
 ### Success Chance
 
 ```
-successChance = 50 + (yourPower - theirPower) / 50
+successChance = 20 + (yourPower - theirPower) / 200
 ```
-- **Minimum**: 10% (even weak players have a chance)
-- **Maximum**: 95% (never guaranteed)
-- Adding extra investment to your coup attempt increases your power for the calculation
+- **Base**: 20%
+- **Minimum**: 5%
+- **Maximum**: 75%
 
 ### On Success
-
-- You swap positions with your target
+- Swap positions with your target
 - They become YOUR subordinate
 - All investors in you receive 50% ROI payout
-- You gain access to a larger downline
+- You gain their entire downline
 
 ### On Failure
-
-- You lose the money spent
-- 10-second cooldown before you can try again
-- Investments in you are lost (investors lose their money)
+- You lose ALL money spent
+- Your lost money goes to YOUR downline (they can buy YOU out!)
+- Target gets 30-second protection
+- Your investors lose their investment
 
 ---
 
 ## Investment System
 
-Invest in other pyramid members to boost their coup power and earn returns.
+Invest in others to boost their power and earn returns.
 
-### How to Invest
+### Investment Rules
 
-1. **Click any node** in the pyramid
-2. **Enter an investment amount**
-3. **Click Invest**
+**Cannot invest in:**
+- Yourself
+- Direct parent (immediate upline)
+- Direct children (immediate downline)
+- Anyone whose upline you are
+
+**Can invest in:**
+- Siblings (same parent)
+- Extended family (cousins, nieces/nephews, etc.)
 
 ### Returns
 
-- If your investment target successfully coups someone: **50% ROI**
-- If they fail: **You lose your investment**
+**Ownership Calculation:**
+```
+Ownership % = Your Investment / Total Investments in Node
+```
 
-### Strategy
+If you invest $100 and there's $1000 total invested, you own 10%.
 
-- **Invest in siblings** - If they coup your shared upline, there's now an opening above you
-- **Invest in your upline** - They climb, you climb (your downline expands)
-- **Invest in aggressive bots** - Watch for bots with high power who might coup soon
+**Dividends:** You earn your ownership % of their daily income.
+
+**Buy-Out Payouts:** If they successfully buy out someone: **50% ROI** on your investment!
+
+---
+
+## Upgrades
+
+### Recruitment Skills (Capped at 5 levels)
+Increases recruits per ad click.
+
+| Level | Cost | Bonus |
+|-------|------|-------|
+| 1 | $1,000 | +1/click |
+| 2 | $5,000 | +3/click |
+| 3 | $25,000 | +8/click |
+| 4 | $100,000 | +20/click |
+| 5 | $400,000 | +50/click |
+
+### Recruit Efficiency (Infinite levels)
+Increases income per recruit per day.
+
+- **Cost**: $50 × 1.4^level (exponential)
+- **Bonus**: +$0.1 per recruit per day per level (linear)
 
 ---
 
 ## Bot AI
 
-The pyramid is populated with bot players who:
+The pyramid is populated with bots who have different personalities:
 
-- **Accumulate money** over time based on their level
-- **Attempt coups** when they have good odds (~30%+) and enough money
-- **Invest in siblings** occasionally (5% chance per tick)
-- **Make the pyramid dynamic** - Positions change even when you're not acting
+- **Grinder** - Conservative, rarely acts, protects position
+- **Shark** - Very aggressive, takes big risks on buy-outs
+- **Venture Capitalist** - Invests constantly, rarely buys out
+- **Schemer** - Invests in siblings, moderate aggression
+- **Opportunist** - Balanced approach, watches for openings
+- **Sleeper** - Almost never acts, saves money
+- **Kingmaker** - Maximum investment focus, backs high-income nodes
 
-Bot names are satirical takes on MLM culture ("Karen from Facebook", "Your Uncle Chad", etc.)
+Bot personality distribution varies by pyramid level (sharks at bottom, grinders at top).
 
 ---
 
 ## Game Configuration
 
-All game parameters are tunable in `src/pyramid.js` via the `CONFIG` object:
+All game parameters are in **`src/config.js`**:
 
 ```javascript
-CONFIG = {
-  // PYRAMID STRUCTURE
-  pyramidLevels: 5,              // Total levels (1+2+4+8+16 = 31 nodes)
-  playerStartLevelMin: 3,        // Player starts at this level or below
+// Day cycle
+DAY = {
+  durationMs: 15000,           // 15 seconds per day
+  baseIncomePerRecruit: 0.5,   // $0.50 per recruit per day
+}
 
-  // INCOME & ECONOMY
-  recruitsPerClickBase: 1,       // Base recruits per click
-  moneyPerRecruit: 10,           // $ earned per recruit
-  downlineIncomePercent: 0.15,   // 15% of each downline member's income
-  uplineSkimPercent: 0.10,       // 10% of your income goes to upline
+// Marketing
+MARKETING = {
+  startingBudget: 500,         // Starting money
+  baseCostPerRecruit: 5,       // $5 per recruit
+  costScaling: 1.001,          // Slight scaling
+}
 
-  // COUP MECHANICS
-  coupBaseCostMultiplier: 0.5,   // Coup cost = defender power × this
-  coupPowerReduction: 0.1,       // Your power reduces coup cost by this %
-  coupMinCost: 50,               // Minimum coup cost
-  coupSuccessBase: 50,           // Base success chance (%)
-  coupPowerScaleFactor: 50,      // How much power difference affects success
-  coupMinChance: 10,             // Minimum success chance (%)
-  coupMaxChance: 95,             // Maximum success chance (%)
-  coupCooldownMs: 10000,         // Cooldown after failed coup (10 sec)
+// Economy
+ECONOMY = {
+  downlineIncomePercent: 0.30, // 30% of downline income
+  uplineSkimPercent: 0.10,     // 10% goes to your upline
+}
 
-  // INVESTMENTS
-  investmentROI: 1.5,            // Payout multiplier (1.5 = 50% ROI)
-  investmentsLostOnFail: true,   // Investors lose money if coup fails
-
-  // BOT AI
-  botCoupChancePerTick: 0.10,    // 10% chance bot attempts coup each second
-  botMinCoupOdds: 30,            // Bot won't coup unless odds ≥ 30%
-  botCoupMoneyBuffer: 1.5,       // Bot needs cost × 1.5 money to coup
-  botCoupExtraInvestPercent: 0.2,// Bot invests 20% of money in coup attempt
-  botInvestChancePerTick: 0.05,  // 5% chance bot invests in sibling
-  botInvestPercent: 0.1,         // Bot invests 10% of money
-  botMinInvestAmount: 10,        // Minimum investment
+// Investments
+INVESTMENT = {
+  roi: 1.5,                    // 50% ROI on success
+  powerMultiplier: 1.5,        // 1.5x power from investments
 }
 ```
 
@@ -179,127 +219,58 @@ CONFIG = {
 ### Pyramid View
 - **Scroll wheel** - Zoom in/out
 - **Click and drag** - Pan around
-- **Click node** - Open action modal (coup/invest)
-- **Zoom buttons** - Fine control (+/-/Reset)
+- **Click node** - Open action modal (buy-out/invest)
 
-### Menu
-- **Menu button** (top right) - Open game menu
-- **Save** - Manual save to localStorage
-- **Restart** - Start a new game
+### Game Over
+
+If someone below you successfully buys you out, the game ends! You'll see your final stats and can restart.
 
 ### Auto-Save
-- Game auto-saves every 30 seconds
-- Game saves when you close the tab/window
+- Auto-saves every 30 seconds
+- Saves when closing the tab
 
 ---
 
-## Current Features
+## Header Analytics
 
-- [x] Basic UI layout (3-column responsive grid)
-- [x] Main recruit button (click to recruit)
-- [x] Money system ($10 per recruit)
-- [x] Tier progression system with satirical names
-- [x] Statistics panel
-- [x] Upgrades panel with scaling costs
-- [x] Rotating motivational quotes (satirical)
-- [x] Reality Check counter (shows people needed to sustain)
-- [x] Visual pyramid with 31 nodes
-- [x] Coup mechanic with success chance algorithm
-- [x] Investment system with ROI tracking
-- [x] Bot AI (coups, investments, income)
-- [x] Downline income (15% of subordinates' earnings)
-- [x] Upline skimming (10% taken by your boss)
-- [x] Save/load game state to localStorage
-- [x] Auto-save every 30 seconds
-- [x] Zoom and pan controls for pyramid
-- [x] Satirical bot name generator
-
-## Tier System
-
-1. Hopeful Newcomer
-2. Bronze Associate
-3. Silver Partner
-4. Gold Executive
-5. Platinum Director
-6. Diamond Elite
-7. Double Diamond Supreme
-8. Triple Platinum Sapphire Overlord
-9. Galactic Ruby Omega Champion
-10. Transcendent Uranium Phoenix Master
+The header shows key stats:
+- **Day** - Current day with progress bar to next tick
+- **Balance** - Your money
+- **Per Day** - Total expected income per day
+- **Recruits** - Your direct recruits
+- **Downline** - People below you in pyramid
+- **Invested** - Total money invested in others
+- **Inv. Income** - Income from investments per day
+- **Level** - Your pyramid level (0 = TOP!)
 
 ---
 
-## Game Balance Notes
+## File Structure
 
-### Design Philosophy
+```
+src/
+├── config.js          - ALL tunable game values
+├── App.jsx            - Main game, day loop, save/load
+├── App.css            - All styling
+├── pyramid.js         - Pyramid logic, buy-out/invest, bot AI
+├── botNames.js        - Satirical name generator
+└── components/
+    ├── PyramidView.jsx      - SVG pyramid visualization
+    ├── PyramidNode.jsx      - Individual node with indicators
+    ├── ActionModal.jsx      - Buy-out/invest modal
+    └── InvestorListModal.jsx - Shows investors
+```
 
-The early game should feel like a **grind**. Players need to work for their first upgrades, and as they progress, the game should push them to engage with **all systems** (clicking, passive income, investments, coups) rather than just clicking their way through.
+---
 
-### Upgrade Economics
+## The Reality Check
 
-The upgrade system is designed with these principles:
-
-1. **Escalating click requirements**: Each upgrade tier requires MORE clicks than the last (not fewer)
-2. **Reward patience**: Later upgrades provide better value per dollar spent
-3. **Force system engagement**: By mid-game, clicking alone becomes impractical - players MUST use passive income and investments
-4. **Human click speed**: Assumes ~5 clicks/second, so costs are calibrated accordingly
-
-### Current Upgrade Tiers
-
-**Recruitment Skills (Click Power):**
-| Level | Cost | Bonus | Clicks to Earn |
-|-------|------|-------|----------------|
-| 1 | $1,000 | +1/click | ~100 clicks |
-| 2 | $5,000 | +3/click | ~250 clicks |
-| 3 | $25,000 | +8/click | ~500 clicks |
-| 4 | $100,000 | +20/click | ~770 clicks |
-| 5 | $400,000 | +50/click | ~1200 clicks |
-
-**Passive Income:**
-| Level | Cost | Bonus |
-|-------|------|-------|
-| 1 | $2,000 | +$2/sec |
-| 2 | $8,000 | +$5/sec |
-| 3 | $30,000 | +$15/sec |
-| 4 | $120,000 | +$40/sec |
-| 5 | $500,000 | +$100/sec |
-
-### Balance Rationale
-
-- **First upgrade at $1,000**: At base rate ($10/click), this is 100 clicks (~20 seconds of dedicated clicking). Feels earned but not tedious.
-- **Escalating costs**: By upgrade 3-4, pure clicking would take 500-800 clicks. Players should be thinking: "I need to coup for better downline income" or "I should invest in that bot about to coup."
-- **Passive income becomes essential**: The passive income upgrades help offset the increasing click requirements, but aren't a replacement for strategic play.
-
-### The Reality Check
-
-The game should feel progressively easier due to upgrades, but the Reality Check counter reminds players that in real life:
-- Each level of a pyramid needs exponentially more people
+The game reminds players that in real life:
+- Each pyramid level needs exponentially more people
 - After ~13 levels at 5 recruits each, you exceed world population
 - 99% of MLM participants lose money
 
 ---
-
-## Development Notes for AI Assistants
-
-When continuing development on this project:
-
-1. **File Structure**:
-   - `src/App.jsx` - Main game component, game loop, save/load
-   - `src/pyramid.js` - Pyramid data structure, coup/invest logic, bot AI
-   - `src/botNames.js` - Satirical name generator
-   - `src/components/PyramidView.jsx` - SVG pyramid visualization
-   - `src/components/PyramidNode.jsx` - Individual node component
-   - `src/components/ActionModal.jsx` - Coup/invest modal UI
-
-2. **State Management**: React useState with refs to avoid useEffect dependency issues in game loop
-
-3. **Game Loop**: 1-second tick interval handles:
-   - Player passive income + downline income - upline skimming
-   - Bot income and AI decisions (coup attempts, investments)
-
-4. **Styling**: CSS variables defined in `index.css` for theming
-
-5. **Satirical Tone**: Keep the humor corporate/MLM focused - absurd tier names, hollow motivational speak, etc.
 
 ## License
 

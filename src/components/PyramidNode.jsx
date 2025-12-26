@@ -13,10 +13,15 @@ export default function PyramidNode({
   isSibling,
   isDownline,
   isSelected,
+  isThreatened,
   hasInvestors,
   investorCount,
   totalInvested,
   onClick,
+  onInvestorBadgeClick,
+  onQuickInvest,
+  canQuickInvest,
+  quickInvestCost,
   x,
   y,
 }) {
@@ -30,6 +35,7 @@ export default function PyramidNode({
   if (isSelected) nodeClass += ' pyramid-node--selected'
   if (node.coupCooldown > Date.now()) nodeClass += ' pyramid-node--cooldown'
   if (hasInvestors && !isPlayer) nodeClass += ' pyramid-node--has-investors'
+  if (isThreatened) nodeClass += ' pyramid-node--threatened'
 
   // Truncate name for display
   const displayName = node.name.length > 12
@@ -108,16 +114,23 @@ export default function PyramidNode({
         </>
       )}
 
-      {/* Investment indicator - shows when someone has invested in this node */}
+      {/* Investment indicator - clickable to see investor list */}
       {hasInvestors && totalInvested > 0 && (
-        <g className="pyramid-node__investment-badge">
+        <g
+          className="pyramid-node__investment-badge"
+          onClick={(e) => {
+            e.stopPropagation()
+            onInvestorBadgeClick && onInvestorBadgeClick(node)
+          }}
+          style={{ cursor: 'pointer' }}
+        >
           <circle
             cx={28}
             cy={-28}
             r={12}
             fill="var(--success)"
             stroke="#fff"
-            strokeWidth="1"
+            strokeWidth="2"
           />
           <text
             x={28}
@@ -166,6 +179,37 @@ export default function PyramidNode({
         >
           ⚔ COUP ⚔
         </text>
+      )}
+
+      {/* Quick invest button (top-left) */}
+      {canQuickInvest && onQuickInvest && (
+        <g
+          className="pyramid-node__quick-invest"
+          onClick={(e) => {
+            e.stopPropagation()
+            onQuickInvest(node.id, quickInvestCost)
+          }}
+          style={{ cursor: 'pointer' }}
+        >
+          <circle
+            cx={-28}
+            cy={28}
+            r={12}
+            fill="var(--primary)"
+            stroke="#fff"
+            strokeWidth="2"
+          />
+          <text
+            x={-28}
+            y={32}
+            textAnchor="middle"
+            fontSize="9"
+            fill="#fff"
+            fontWeight="bold"
+          >
+            5%
+          </text>
+        </g>
       )}
     </g>
   )
